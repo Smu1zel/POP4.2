@@ -1,0 +1,1 @@
+- WindowsCodecs.dll (Windows\System32\WindowsCodecs.dll)

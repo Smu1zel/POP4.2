@@ -9,7 +9,7 @@ First, extract ntoskrnl from boot.wim from the Windows 11 build you'd like to pa
 ``.\build_patched_iso.ps1 -IsoDrive "\<drive letter\>:" -Index \<install.wim/esd index number\> -OscdimgPath "\<path to oscdimg.exe\>"``. After running it, you will get an ISO you can then use in VMs, Rufus/Ruflux, or other online utilities. It is recommended that, if you are using Rufus/Ruflux, that you apply its system requirements patches. While I handle the hard machine code checks, I do not patch what setup.exe wants. Ensure you press F8 at boot to disable driver signature enforcement.
 
 ## Why WindowsCodecs.dll?
-For some reason, Microsoft compiled this specific DLL with SSE4.1 instructions. If you do not replace this, it will attempt to execute instruction ``PMOVSXBW`` (bytes ``, crash, and since setup.exe utilizes it, Windows Setup will crash and restart. Even if you deploy the WIM manually, WIndows will later enter Automatic Recovery since it tries to execute setup.exe again to finish installing. For these reasons, replacing this is required.
+For some reason, Microsoft compiled this specific DLL with SSE4.1 instructions. If you do not replace this, it will attempt to execute instruction ``PMOVSXBW`` (bytes ``, crash, and since setup.exe utilizes it, Windows Setup will crash and restart. Even if you deploy the WIM manually, Windows will later enter Automatic Recovery since it tries to execute setup.exe again to finish installing. For these reasons, replacing this is required.
 
 ## Known issues
 - Certain Nvidia nForce chipsets hang on boot. Needs further investigation.

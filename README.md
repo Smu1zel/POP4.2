@@ -16,6 +16,10 @@ For some reason, Microsoft compiled this specific DLL with SSE4.1 instructions. 
 - You must manually enable the legacy boot menu and press F8 to disable driver signature enforcement.
 - This whole thing is experimental. Please file any bugs or quirks you find in the Issues tab. I don't even have Phenom hardware; I used QEMU.
 
+## Screenshot
+
+![Screenshot](Screenshot.png)
+
 ## Credits
 - Bob Pony, for letting me test on his machine.
 - QEMU, for making a great emulator and debugger.

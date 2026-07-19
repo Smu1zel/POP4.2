@@ -22,5 +22,5 @@ $(TARGET): $(OBJ)
 
 # Clean
 clean:
-	rm -f $(OBJ) $(TARGET) main.o
+	rm -f $(OBJ) $(TARGET)
 

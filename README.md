@@ -14,6 +14,7 @@ For some reason, Microsoft compiled this specific DLL with SSE4.1 instructions. 
 ## Known issues
 - Certain Nvidia nForce chipsets hang on boot. Needs further investigation.
 - You must manually enable the legacy boot menu and press F8 to disable driver signature enforcement.
+- Intel Core 2 CPUs (and similar architectures like Yonah) are not currently supported. These lack POPCNT, which *is* used heavily.
 - This whole thing is experimental. Please file any bugs or quirks you find in the Issues tab. I don't even have Phenom hardware; I used QEMU.
 
 ## Screenshot

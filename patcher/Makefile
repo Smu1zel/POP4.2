@@ -1,5 +1,5 @@
 # Compiler and flags
-CXX = g++
+CC = gcc
 CFLAGS = -Os -s -o POP42Patcher.exe -lcomdlg32 -lgdi32 -mwindows -static
 
 # Targets
@@ -16,7 +16,7 @@ main.o: $(SRC)
 
 # Link everything
 $(TARGET): $(OBJ)
-	$(CXX) $(OBJ) \
+	$(CC) $(OBJ) \
 	-lcomdlg32 -lgdi32 -mwindows -static -s \
 	-o $(TARGET)
 

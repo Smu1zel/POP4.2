@@ -59,6 +59,7 @@ $isoFilesDir = "$workDir\iso_files"
 $localBootWim = "$workDir\boot.wim"
 $localInstallWim = "$workDir\install.wim"
 $mountDir = "$workDir\mount"
+$recoveryMountDir = "$workDir\mountRE"
 $patchedKernel = "$workDir\ntoskrnl.exe"
 $outputIso = "$workDir\patched_install.iso"
 
@@ -83,6 +84,15 @@ if (Test-Path $mountDir) {
 }
 if (-not (Test-Path $mountDir)) {
     New-Item -Path $mountDir -ItemType Directory -Force | Out-Null
+}
+
+if (Test-Path $recoveryMountDir) {
+    # If the folder is still locked/mounted, try to force dismount it discarding changes
+    dism /Unmount-Image /MountDir:$recoveryMountDir /Discard 2>&1 | Out-Null
+    Remove-Item -Path $recoveryMountDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+if (-not (Test-Path $recoveryMountDir)) {
+    New-Item -Path $recoveryMountDir -ItemType Directory -Force | Out-Null
 }
 
 # Step 2: Copy ISO contents to workspace folder using multi-threaded Robocopy
@@ -306,15 +316,24 @@ if (-not $BootOnly) {
         if ($LastExitCode -ne 0) {
             throw "Error: Failed to mount install.wim Index $idxToMount!"
         }
-        
         try {
             Apply-PatchesToMount -targetMountDir $mountDir
+			try { 
+			 Write-Host "`nMounting winre.wim..."
+             dism /Mount-Image /ImageFile:$mountDir\Windows\System32\Recovery\winre.wim /Index:1 /MountDir:$recoveryMountDir
+			 Apply-PatchesToMount -targetMountDir $recoveryMountDir
+			} catch {
+		     Write-Host "Error occurred while patching winre.wim."
+             dism /Unmount-Image /MountDir:$recoveryMountDir /Discard
+             exit 1
+			}
         } catch {
             Write-Host "Error occurred while patching install.wim Index $($idxToMount): $_"
             dism /Unmount-Image /MountDir:$mountDir /Discard
             exit 1
-        }
-        
+		}
+        Write-Host "Dismounting and committing winre.wim..."
+        dism /Unmount-Image /MountDir:$recoveryMountDir /Commit
         Write-Host "Dismounting and committing install.wim Index $idxToMount..."
         dism /Unmount-Image /MountDir:$mountDir /Commit
     }

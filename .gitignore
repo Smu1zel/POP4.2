@@ -1,0 +1,5 @@
+/iso_files
+*.o
+*.exe
+*.iso
+*.dll

@@ -1,5 +1,8 @@
 # Building the patcher
 
+> [!IMPORTANT]
+> Windows PE does **not** have WOW64 by default. If you want to patch Windows from PE, make sure you build the patcher for the same architecture PE is (almost certainly x86-64).
+
 1. Download [MSYS2](https://www.msys2.org/) and install it.
 2. Open up MSYS2 MINGW64. To only build the patcher, you need to use pacman to install following dependencies:
 

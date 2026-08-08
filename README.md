@@ -8,7 +8,7 @@ This is an experimental patcher that allows CPUs *with* POPCNT, but *without* SS
 Yes and no. while Windows 11 checks for *both* POPCNT and SSE4.2, it does not actually need SSE4.2 for 99% of its files, with only a singular exception that can be worked around (read on). To enforce this, Microsoft uses the undocumented ``RtlDetectProcessorFeatures`` function and checks for a few requirements by reading data from .rdata. In kernel 26100.7171, this is at offset ``00000001400088C0`` and has the bytes ``01 00 00 00 00 00 00 00 00 00 10 00 02 00 00 00 0D 00 00 00`` in IDA. To defeat this, we simply flip that ``0D`` to a ``0C``, telling Windows to effectively skip the check and continue booting.
 
 ## Okay, so how do I use this?
-First, extract ntoskrnl from boot.wim from the Windows 11 build you'd like to patch. Run my patcher, keep the default options (unless you're me or know what you're doing!), and patch the file. After that, obtain a copy of WindowsCodecs.dll from 23H2 (see *"Why WindowsCodecs.dll?"* for more info) and place it in the same directory. After that, run `Set-ExecutionPolicy Unrestricted` in an elevated PowerShell prompt, mount the ISO in Windows, and use the following syntax: `.\build_patched_iso.ps1 -IsoDrive "<drive letter>:" -Index <install.wim/esd index number> -OscdimgPath "<path to oscdimg.exe>"`. 
+First, extract ntoskrnl from boot.wim from the Windows 11 build you'd like to patch. Then, [build the patcher](patcher/BUILD.md). Run it, keep the default options (unless you're me or know what you're doing!), and patch the file. After that, obtain a copy of WindowsCodecs.dll from 23H2 (see *"Why WindowsCodecs.dll?"* for more info) and place it in the same directory. After that, run `Set-ExecutionPolicy Unrestricted` in an elevated PowerShell prompt, mount the ISO in Windows, and use the following syntax: `.\build_patched_iso.ps1 -IsoDrive "<drive letter>:" -Index <install.wim/esd index number> -OscdimgPath "<path to oscdimg.exe>"`. 
 After running it, you will get an ISO you can then use in VMs, Rufus/Ruflux, or other online utilities. It is recommended that, if you are using Rufus/Ruflux, that you apply its system requirements patches. While I handle the hard machine code checks, I do not patch what setup.exe wants. Ensure you press F8 at boot to disable driver signature enforcement.
 
 ## Why WindowsCodecs.dll?
@@ -17,7 +17,7 @@ For some reason, Microsoft compiled this specific DLL with SSE4.1 instructions. 
 ## Known issues
 - Certain Nvidia nForce chipsets hang on boot. Needs further investigation.
 - You must manually enable the legacy boot menu and press F8 to disable driver signature enforcement.
-- Intel Core 2 CPUs (and similar architectures like Yonah) are not currently supported. These lack POPCNT, which *is* used heavily.
+- Intel Core 2 CPUs are not currently supported. These lack POPCNT, which *is* used heavily.
 - This whole thing is experimental. Please file any bugs or quirks you find in the Issues tab. I don't even have Phenom hardware; I used QEMU.
 
 ## Screenshot

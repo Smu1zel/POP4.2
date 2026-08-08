@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> I've just ordered an Acer Aspire 5253-BZ412 from eBay for debugging. Expect my ability to help with issues to be limited until it arrives. I apologize for the inconvenience.
-
 # POP4.2
 This is an experimental patcher that allows CPUs *with* POPCNT, but *without* SSE4.2 (such as the AMD Phenom and K10 lines of CPUs) to boot Windows 11 24H2 and beyond. It has been tested on Windows 11 25H2 v2. Other builds have not been tested, but should work.
 

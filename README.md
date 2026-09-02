@@ -5,11 +5,12 @@ This is an experimental patcher that allows CPUs *with* POPCNT, but *without* SS
 Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not actually need SSE4.2 for 99% of its files, with only a singular exception that can be worked around (read on). To enforce this, Microsoft uses the undocumented `RtlDetectProcessorFeatures` function and checks for requirements by reading data from `.rdata`. In kernel 26100.7171, this is at offset `00000001400088C0` and has the bytes `01 00 00 00 00 00 00 00 00 00 10 00 02 00 00 00 0D 00 00 00` in IDA. To defeat this, we simply flip that `0D` to a `0C`, telling Windows to effectively skip the check and continue booting.
 
 ## Prerequisites
+- Windows 8 or newer
 - Python 3.9+ with `pefile`:
   ```bash
   pip install pefile
   ```
-- Windows ADK (Deployment Tools) for `oscdimg.exe` (or have `oscdimg.exe` in your system `PATH`).
+- Windows ADK (Deployment Tools) for `oscdimg.exe`. It will be automatically downloaded if missing.
 - A copy of `WindowsCodecs.dll` (64-bit) extracted from Windows 11 23H2 placed into the `blobs/` directory (see *"Why WindowsCodecs.dll?"* below).
 
 ## Usage
@@ -17,18 +18,30 @@ Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not ac
 ### 1. Build a Full Patched ISO (Recommended)
 You can build a bootable dual-boot (UEFI + BIOS) patched ISO from your original Windows 11 ISO with a single command:
 ```bash
-python pop42.py build -i Win11_24H2_English_x64.iso -o Win11_Patched.iso
+python pop42.py build -i Win11_24H2_English_x64.iso -o Win11_Patched.iso --clean --index <index_number>
 ```
-*Note: This command will automatically request Administrator elevation to manage WIM mounts and offline registry hives.*
+> [!NOTE]
+> This command will automatically request Administrator elevation to manage WIM mounts and offline registry hives.
 
-### 2. Standalone File Patching
-If you only need to patch `ntoskrnl.exe` directly:
-```bash
-python pop42.py patch ntoskrnl -i path\to\ntoskrnl.exe -o path\to\ntoskrnl_patched.exe
-```
+### 2. Standalone Binary Patching
+If you only need to patch individual binaries directly (e.g. for testing or Windows PE):
+* **Patch the NT Kernel (`ntoskrnl.exe`):**
+  ```bash
+  python pop42.py patch kernel_sse42 -i path\to\ntoskrnl.exe -o path\to\ntoskrnl_patched.exe
+  ```
+* **Patch the Boot Loader (`winload.efi` / `winload.exe`):**
+  ```bash
+  python pop42.py patch winload -i path\to\winload.exe -o path\to\winload_patched.exe
+  ```
+> [!NOTE]
+> If `-o` is omitted, the input file will be modified and overwritten in-place.
 
-### 3. Legacy WinPE Patcher (C GUI)
-For running inside minimal Windows PE environments (where Python is not available), the standalone C patcher is available under [`patcher/`](patcher/). See [`patcher/BUILD.md`](patcher/BUILD.md) for compilation instructions.
+### 3. Legacy C Patcher
+> [!IMPORTANT]
+> This patcher is deprecated. You probably want to use the Nuitka-compiled Python script instead.
+
+This can be found in the `patcher_legacy` folder of this repository. It's a standard Win32 app that should execute
+on basically anything that can run a Win32 executable.
 
 ---
 
@@ -42,7 +55,6 @@ POP4.2 tracks problematic binaries using `badblobs.xml`. Each entry defines targ
 
 ## Known issues
 - Certain Nvidia nForce chipsets hang on boot. Needs further investigation.
-- You must manually enable the legacy boot menu and press F8 to disable driver signature enforcement.
 - Intel Core 2 CPUs are not currently supported. These lack POPCNT, which *is* used heavily.
 - This whole thing is experimental. Please file any bugs or quirks you find in the Issues tab.
 

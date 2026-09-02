@@ -14,12 +14,13 @@ How it works:
    Bit 20 (SSE4.2) with Flags set to 0x0000000D (Mandatory).
 3. Flipping this Flags value from 0x0D to 0x0C converts the check into an
    optional feature, bypassing the unsupported processor check without breaking
-   kernel stability (since the kernel itself does not execute SSE4.2).
+   kernel stability (since the kernel itself does not execute SSE4.2 instructions).
 4. WindowsCodecs.dll is replaced with a 23H2 build to prevent crashes on
    SSE4.1 PMOVSXBW instructions during Windows Setup execution.
 5. The offline registry and BCD stores are configured with DISABLE_INTEGRITY_CHECKS
    and TESTSIGNING to allow running the modified kernel with driver signature
-   enforcement disabled (via the legacy F8 boot menu).
+   enforcement disabled (via the legacy F8 boot menu or via an experimental patch;
+   see badblobs.xml).
 ================================================================================
 """
 

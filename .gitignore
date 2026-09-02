@@ -1,4 +1,10 @@
 /iso_files
+/pop42.build
+/pop42.dist
+/pop42.onefile-build
+/build_workspace
+/tools
+__pycache__/
 *.o
 *.exe
 *.iso

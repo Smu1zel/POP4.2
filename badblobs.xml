@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<BadBlobs>
+    <!-- Windows NT Kernel: In-place SSE4.2 requirement patch -->
+    <Blob id="ntoskrnl" action="patch" patcher="kernel_sse42" enabled="true">
+        <Target>Windows/System32/ntoskrnl.exe</Target>
+        <Description>Windows 11's NT Kernel (Bypasses SSE4.2 CPUID requirement table check)</Description>
+        <Options>
+            <!-- You probably don't need to change any of these, but they can be useful for debugging-->
+            <Option name="patch_cpuid" value="true" />
+            <Option name="patch_kiset" value="false" />
+            <!-- This indirectly disables bugchecks/BSODs. Do not enable unless you are debugging-->
+            <Option name="debug_loop" value="false" />
+        </Options>
+    </Blob>
+
+    <!-- Windows Codecs 64-bit library: Replaces SSE4.1 PMOVSXBW build with 23H2 binary -->
+    <Blob id="wincodecs" action="replace" file="WindowsCodecs.dll" enabled="true">
+        <Target>Windows/System32/WindowsCodecs.dll</Target>
+        <Description>Windows Codecs 64-bit library (Replaces SSE4.1 instructions with 23H2 build)</Description>
+    </Blob>
+</BadBlobs>

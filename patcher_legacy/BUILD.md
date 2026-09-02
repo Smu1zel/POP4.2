@@ -1,3 +1,8 @@
+## THIS IS DEPRECATED
+
+> [!IMPORTANT]
+> This is only really useful for very restrictive Windows PE environments. Please use the Python script instead.
+
 # Building the patcher
 
 > [!IMPORTANT]

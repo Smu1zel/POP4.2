@@ -18,4 +18,32 @@
         <Target>Windows/System32/WindowsCodecs.dll</Target>
         <Description>Windows Codecs 64-bit library (Replaces SSE4.1 instructions with 23H2 build)</Description>
     </Blob>
+
+    <!-- Windows Boot Loader: In-place Code Integrity and testsigning bypass (Disabled by default) -->
+    <Blob id="winload_boot_efi" action="patch" patcher="winload" enabled="false">
+        <Target>Windows/System32/boot/winload.efi</Target>
+        <Description>Windows Boot Loader UEFI (Bypasses CI check and preserves testsigning without F8)</Description>
+        <Options>
+            <Option name="patch_ci_filter" value="true" />
+            <Option name="patch_boot_options" value="true" />
+        </Options>
+    </Blob>
+
+    <Blob id="winload_sys32_efi" action="patch" patcher="winload" enabled="false">
+        <Target>Windows/System32/winload.efi</Target>
+        <Description>Windows Boot Loader UEFI System32 (Bypasses CI check and preserves testsigning without F8)</Description>
+        <Options>
+            <Option name="patch_ci_filter" value="true" />
+            <Option name="patch_boot_options" value="true" />
+        </Options>
+    </Blob>
+
+    <Blob id="winload_exe" action="patch" patcher="winload" enabled="false">
+        <Target>Windows/System32/winload.exe</Target>
+        <Description>Windows Boot Loader Legacy BIOS (Bypasses CI check and preserves testsigning without F8)</Description>
+        <Options>
+            <Option name="patch_ci_filter" value="true" />
+            <Option name="patch_boot_options" value="true" />
+        </Options>
+    </Blob>
 </BadBlobs>

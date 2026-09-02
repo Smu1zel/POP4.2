@@ -238,15 +238,22 @@ def patch_kernel_bytes(data: bytearray, patch_cpuid: bool = True, patch_kiset: b
     # 1. CPUID Requirements Table Patch (Index 6: SSE4.2 Flags 0x0D -> 0x0C)
     if patch_cpuid:
         # 20-byte signature: Leaf=1, Subleaf=0, Mask=0x00100000, Reg=2 (ECX), Flags=0x0D
-        req_sig = bytes.fromhex("010000000000000000001000020000000D000000")
-        req_idx = data.find(req_sig)
+        req_sig_0d = bytes.fromhex("010000000000000000001000020000000D000000")
+        req_sig_0c = bytes.fromhex("010000000000000000001000020000000C000000")
+
+        req_idx = data.find(req_sig_0d)
         if req_idx != -1:
             # Overwrite Flags byte at offset 16 from 0x0D to 0x0C
             data[req_idx + 16] = 0x0C
             report["cpuid_patched"] = True
             print(f"[+] Patched CPUID requirements table entry at offset 0x{req_idx:X} (Flags: 0x0D -> 0x0C).")
         else:
-            print("[-] Warning: Mandatory SSE4.2 CPUID requirement table entry (0x0D) not found in binary.")
+            idx_0c = data.find(req_sig_0c)
+            if idx_0c != -1:
+                report["cpuid_patched"] = True
+                print(f"[*] Notice: CPUID requirements table entry at offset 0x{idx_0c:X} is already patched (Flags: 0x0C).")
+            else:
+                print("[-] Warning: Mandatory SSE4.2 CPUID requirement table entry (0x0D) not found in binary.")
 
     # 2. KiSetFeatureBits CPU branch jump checks (Disabled by default)
     if patch_kiset:
@@ -308,7 +315,7 @@ def patch_kernel_bytes(data: bytearray, patch_cpuid: bool = True, patch_kiset: b
 
 
 @register_patcher("kernel_sse42")
-def patch_kernel_file(input_path: str, output_path: str = None, patch_cpuid: bool = True, patch_kiset: bool = False, enable_debug: bool = False) -> bool:
+def patch_kernel_file(input_path: str, output_path: str = None, patch_cpuid: bool = True, patch_kiset: bool = False, debug_loop: bool = False, enable_debug: bool = False, **kwargs) -> bool:
     """
     Registered patch routine for Windows Kernel ('kernel_sse42').
     Reads the input binary, applies byte patches, writes output, and recalculates PE checksum.
@@ -320,11 +327,111 @@ def patch_kernel_file(input_path: str, output_path: str = None, patch_cpuid: boo
     if output_path is None:
         output_path = input_path
 
+    is_debug = debug_loop or enable_debug
     print(f"[*] Reading kernel binary: {input_path}")
     with open(input_path, "rb") as f:
         data = bytearray(f.read())
 
-    modified_data, report = patch_kernel_bytes(data, patch_cpuid, patch_kiset, enable_debug)
+    modified_data, report = patch_kernel_bytes(data, patch_cpuid, patch_kiset, is_debug)
+
+    with open(output_path, "wb") as f:
+        f.write(modified_data)
+
+    print(f"[+] Written patched binary to: {output_path}")
+    if fix_pe_checksum(output_path):
+        print("[+] Recalculated and updated PE Checksum successfully.")
+    return True
+
+
+def patch_winload_bytes(data: bytearray, patch_ci_filter: bool = True, patch_boot_options: bool = True) -> tuple:
+    """
+    Applies the winload Code Integrity (CI) and boot options bypass modifications:
+    
+    1. ImgpFilterValidationFailure -> xor eax, eax; ret (31 C0 C3):
+       Forces the Code Integrity validation filter to return STATUS_SUCCESS (0),
+       preventing winload from rejecting the patched ntoskrnl.exe binary.
+       
+    2. BlRemoveBootOption Stripping NOPs:
+       NOPs out calls to BlRemoveBootOption that strip critical boot options:
+       - 0x16000048: nointegritychecks
+       - 0x260000E1: testsigning
+       Preserving these options avoids having to enter the legacy F8 menu on every boot.
+    """
+    report = {
+        "ci_filter_patched": False,
+        "ci_filter_already_patched": False,
+        "nointegritychecks_patched": False,
+        "testsigning_patched": False
+    }
+
+    # 1. Patch ImgpFilterValidationFailure
+    if patch_ci_filter:
+        # Signature matching the function prologue of ImgpFilterValidationFailure:
+        # 48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 48 89 78 20 41 56 48 83 EC 40
+        filter_sig = bytes.fromhex("488BC44889580848896810488970184889782041564883EC40")
+        filter_idx = data.find(filter_sig)
+        if filter_idx != -1:
+            data[filter_idx : filter_idx + 3] = bytes.fromhex("31C0C3")
+            report["ci_filter_patched"] = True
+            print(f"[+] Patched ImgpFilterValidationFailure at offset 0x{filter_idx:X} (31 C0 C3 -> force STATUS_SUCCESS).")
+        else:
+            if (data.find(bytes.fromhex("31C0C348895808")) != -1 or 
+                data.find(bytes.fromhex("31C0C348896810")) != -1):
+                report["ci_filter_already_patched"] = True
+                print("[*] Notice: ImgpFilterValidationFailure is already patched (31 C0 C3).")
+            else:
+                print("[-] Warning: ImgpFilterValidationFailure signature not found in winload binary.")
+
+    # 2. Patch BlRemoveBootOption calls
+    if patch_boot_options:
+        # 2a. Option 0x16000048 (nointegritychecks)
+        sig_opt1 = bytes.fromhex("BA48000016")
+        idx1 = data.find(sig_opt1)
+        if idx1 != -1:
+            for i in range(idx1, min(idx1 + 20, len(data))):
+                if data[i] == 0xE8:
+                    data[i : i + 5] = b'\x90' * 5
+                    report["nointegritychecks_patched"] = True
+                    print(f"[+] NOPed out BlRemoveBootOption(nointegritychecks) call at offset 0x{i:X}.")
+                    break
+        else:
+            print("[-] Notice: nointegritychecks (0x16000048) removal signature not found.")
+
+        # 2b. Option 0x260000E1 (testsigning)
+        sig_opt2 = bytes.fromhex("BAE1000026")
+        idx2 = data.find(sig_opt2)
+        if idx2 != -1:
+            for i in range(idx2, min(idx2 + 20, len(data))):
+                if data[i] == 0xE8:
+                    data[i : i + 5] = b'\x90' * 5
+                    report["testsigning_patched"] = True
+                    print(f"[+] NOPed out BlRemoveBootOption(testsigning) call at offset 0x{i:X}.")
+                    break
+        else:
+            print("[-] Notice: testsigning (0x260000E1) removal signature not found.")
+
+    return data, report
+
+
+@register_patcher("winload")
+def patch_winload_file(input_path: str, output_path: str = None, patch_ci_filter: bool = True, patch_boot_options: bool = True, **kwargs) -> bool:
+    """
+    Registered patch routine for Windows Boot Loader ('winload').
+    Reads winload.exe or winload.efi, applies CI filter and boot option patches,
+    writes output, and recalculates PE checksum.
+    """
+    if not os.path.exists(input_path):
+        print(f"[-] Error: Winload file not found: {input_path}")
+        return False
+
+    if output_path is None:
+        output_path = input_path
+
+    print(f"[*] Reading winload binary: {input_path}")
+    with open(input_path, "rb") as f:
+        data = bytearray(f.read())
+
+    modified_data, report = patch_winload_bytes(data, patch_ci_filter, patch_boot_options)
 
     with open(output_path, "wb") as f:
         f.write(modified_data)
@@ -473,8 +580,8 @@ class WimMountSession:
         self.mounted = True
         return self
 
-    def apply_blobs(self, db: BlobDatabase, blobs_dir: str, patch_cpuid: bool = True, patch_kiset: bool = False, debug_loop: bool = False):
-        """Applies all enabled blobs to the mounted WIM filesystem."""
+    def apply_blobs(self, db: BlobDatabase, blobs_dir: str):
+        """Applies all enabled blobs to the mounted WIM filesystem using options from badblobs.xml."""
         for b_id, blob in db.blobs.items():
             if not blob.enabled:
                 continue
@@ -487,14 +594,7 @@ class WimMountSession:
                         print(f"  [+] Executing patch handler '{blob.patcher}' on '{b_id}' at {blob.target}...")
                         take_ownership_and_grant(target_full_path)
                         handler = PATCHER_REGISTRY[blob.patcher]
-                        
-                        if blob.patcher == "kernel_sse42":
-                            opt_cpuid = patch_cpuid and blob.options.get("patch_cpuid", True)
-                            opt_kiset = patch_kiset or blob.options.get("patch_kiset", False)
-                            opt_debug = debug_loop or blob.options.get("debug_loop", False)
-                            handler(target_full_path, target_full_path, opt_cpuid, opt_kiset, opt_debug)
-                        else:
-                            handler(target_full_path, target_full_path)
+                        handler(target_full_path, target_full_path, **blob.options)
                     else:
                         print(f"  [-] Target '{blob.target}' not found in this image index. Skipping.")
                 else:
@@ -729,9 +829,7 @@ def build_iso(
     blobs_dir: str,
     selected_index: int = None,
     boot_only: bool = False,
-    patch_cpuid: bool = True,
-    patch_kiset: bool = False,
-    debug_loop: bool = False,
+    clean: bool = False,
     oscdimg_path: str = None
 ):
     """
@@ -766,11 +864,18 @@ def build_iso(
     subprocess.run(["dism.exe", "/Cleanup-Mountpoints"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(["reg.exe", "unload", "HKLM\\POP42_OfflineSystem"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    if clean and os.path.exists(iso_files_dir):
+        print(f"[*] --clean specified. Wiping existing ISO workspace files: {iso_files_dir}...")
+        clear_readonly(iso_files_dir)
+        shutil.rmtree(iso_files_dir, ignore_errors=True)
+
     # Extract or copy source ISO media
     sources_dir = os.path.join(iso_files_dir, "sources")
     has_install = os.path.exists(os.path.join(sources_dir, "install.wim")) or os.path.exists(os.path.join(sources_dir, "install.esd"))
 
-    if not has_install:
+    if has_install:
+        print(f"[*] Reusing existing workspace ISO files in: {iso_files_dir}")
+    else:
         if input_iso.endswith(".iso") and os.path.exists(input_iso):
             print(f"[*] Mounting source ISO: {input_iso}...")
             ps_cmd = f"(Mount-DiskImage -ImagePath '{os.path.abspath(input_iso)}' -PassThru | Get-Volume).DriveLetter"
@@ -815,7 +920,7 @@ def build_iso(
     clear_readonly(local_boot_wim)
 
     with WimMountSession(local_boot_wim, index=2, mount_dir=mount_dir) as session:
-        session.apply_blobs(db, blobs_dir, patch_cpuid, patch_kiset, debug_loop)
+        session.apply_blobs(db, blobs_dir)
         session.modify_offline_registry()
         session.commit()
 
@@ -869,7 +974,7 @@ def build_iso(
         for idx in wim_indexes:
             print(f"\n[*] Mounting and patching install.wim Index {idx}...")
             with WimMountSession(local_install_wim, index=idx, mount_dir=mount_dir) as session:
-                session.apply_blobs(db, blobs_dir, patch_cpuid, patch_kiset, debug_loop)
+                session.apply_blobs(db, blobs_dir)
                 session.modify_offline_registry()
 
                 # Patch nested WinRE (Windows Recovery Environment) inside the OS image
@@ -879,7 +984,7 @@ def build_iso(
                     clear_readonly(winre_path)
                     print(f"  [*] Patching nested Recovery Image (winre.wim)...")
                     with WimMountSession(winre_path, index=1, mount_dir=re_mount_dir) as re_session:
-                        re_session.apply_blobs(db, blobs_dir, patch_cpuid, patch_kiset, debug_loop)
+                        re_session.apply_blobs(db, blobs_dir)
                         re_session.modify_offline_registry()
                         re_session.commit()
 
@@ -941,48 +1046,92 @@ def build_iso(
 # 6. CLI INTERFACE & ENTRY POINT
 # ==============================================================================
 
+class UnifiedArgumentParser(argparse.ArgumentParser):
+    """
+    Custom ArgumentParser that automatically appends full parameter documentation
+    for all registered subcommands directly into the top-level --help output.
+    """
+    def format_help(self):
+        base_help = super().format_help()
+        if hasattr(self, '_subparsers_ref') and self._subparsers_ref:
+            sections = []
+            sections.append("\n" + "=" * 78)
+            sections.append("DETAILED SUBCOMMAND PARAMETER REFERENCE")
+            sections.append("=" * 78 + "\n")
+            for name, sub in self._subparsers_ref.choices.items():
+                sections.append(f"--- [ COMMAND: {name.upper()} ] " + "-" * (58 - len(name)))
+                sections.append(sub.format_help())
+            return base_help + "\n".join(sections)
+        return base_help
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="POP4.2: Windows 11 SSE4.2 Requirements Patcher & ISO Builder",
+    parser = UnifiedArgumentParser(
+        prog="pop42.py",
+        description="""
+================================================================================
+POP4.2: Windows 11 SSE4.2 Requirements Patcher & ISO Builder
+================================================================================
+Bypasses mandatory SSE4.2 CPU instruction requirements on Windows 11 (24H2+)
+for CPUs with POPCNT (AMD Phenom II, Athlon II, K10, etc.) by converting
+kernel CPUID table entries from mandatory (0x0D) to optional (0x0C).
+""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # 1. Patch a standalone kernel file:
-  python pop42.py patch ntoskrnl -i C:\\path\\to\\ntoskrnl.exe
+================================================================================
+COMMON USAGE EXAMPLES:
+================================================================================
+  # 1. Build a full bootable Windows 11 ISO patching only Windows 11 Pro (Index 6):
+  python pop42.py build -i Win11_24H2_x64.iso -o Win11_Patched.iso --index 6
 
-  # 2. Build a full patched Windows 11 ISO:
-  python pop42.py build -i Win11_24H2.iso -o Win11_Patched.iso
+  # 2. Build ISO patching ONLY boot.wim (skipping install.wim entirely):
+  python pop42.py build -i Win11_24H2_x64.iso --boot-only
 
-  # 3. Build with custom XML profile and options:
-  python pop42.py build -i Win11_24H2.iso -c badblobs.xml --debug-loop --allow-missing-blobs
+  # 3. Build with custom XML profile:
+  python pop42.py build -i Win11_24H2_x64.iso -c custom_badblobs.xml
+
+  # 4. Patch a standalone kernel file using the registered 'kernel_sse42' patcher:
+  python pop42.py patch kernel_sse42 -i C:\\path\\to\\ntoskrnl.exe
+
+  # 5. Patch kernel to a separate file with custom options:
+  python pop42.py patch kernel_sse42 -i ntoskrnl.exe -o ntoskrnl_debug.exe -O debug_loop=true -O patch_kiset=true
+
+  # 6. Interactive wizard (prompts for ISO path and edition index):
+  python pop42.py
         """
     )
 
-    subparsers = parser.add_subparsers(dest="mode", help="Operation mode")
+    subparsers = parser.add_subparsers(dest="mode", help="Execution mode (run 'pop42.py <command> --help' for command-specific help)")
+    parser._subparsers_ref = subparsers
 
     # Mode 1: PATCH (Standalone binary patcher)
-    patch_parser = subparsers.add_parser("patch", help="Directly patch a binary file by shorthand or path")
-    patch_parser.add_argument("shorthand", nargs="?", default="ntoskrnl", help="Blob shorthand from badblobs.xml (default: ntoskrnl)")
-    patch_parser.add_argument("-i", "--input", required=True, help="Path to input binary (e.g. ntoskrnl.exe)")
-    patch_parser.add_argument("-o", "--output", default=None, help="Path to output patched binary (default: overwrite input)")
-    patch_parser.add_argument("--no-cpuid", action="store_true", help="Skip CPUID requirements table patch")
-    patch_parser.add_argument("--kiset", action="store_true", help="Enable KiSetFeatureBits conditional jump NOPs (disabled by default)")
-    patch_parser.add_argument("--debug-loop", action="store_true", help="Enable KeBugCheckEx infinite loop (EB FE) for QEMU GDB debugging")
+    patch_parser = subparsers.add_parser(
+        "patch",
+        help="Directly patch an individual binary file using a registered patcher routine",
+        description="Applies a registered patch routine (e.g. 'kernel_sse42') directly to an individual PE binary file."
+    )
+    patch_parser.add_argument("patcher", help="Registered patcher routine to execute (e.g. 'kernel_sse42'). Available: " + ", ".join(PATCHER_REGISTRY.keys()))
+    patch_parser.add_argument("-i", "--input", required=True, metavar="PATH", help="Path to input PE binary to patch (e.g. C:\\path\\to\\ntoskrnl.exe)")
+    patch_parser.add_argument("-o", "--output", default=None, metavar="PATH", help="Destination path for patched binary. If omitted, the input binary is modified and overwritten in-place. [Default: overwrite input]")
+    patch_parser.add_argument("-O", "--option", action="append", default=[], metavar="KEY=VALUE", help="Pass options to the patcher routine (e.g. -O patch_kiset=true -O debug_loop=true). Can be specified multiple times.")
 
     # Mode 2: BUILD (Full ISO pipeline)
-    build_parser = subparsers.add_parser("build", help="Build an end-to-end bootable patched Windows 11 ISO")
-    build_parser.add_argument("-i", "--input-iso", required=True, help="Path to source Windows 11 ISO or extracted directory")
-    build_parser.add_argument("-o", "--output-iso", default="patched_install.iso", help="Path for output ISO (default: patched_install.iso)")
-    build_parser.add_argument("-w", "--work-dir", default=None, help="Temporary workspace directory")
-    build_parser.add_argument("-c", "--config", default=None, help="Path to badblobs.xml configuration")
-    build_parser.add_argument("-b", "--blobs-dir", default=None, help="Path to blobs replacement directory (default: ./blobs)")
-    build_parser.add_argument("--index", default=None, help="Specific OS index in install.wim to patch (e.g. 6 for Pro, 'all', or 'none' for boot.wim only)")
-    build_parser.add_argument("--boot-only", action="store_true", help="Only patch boot.wim (skip install.wim)")
-    build_parser.add_argument("--no-cpuid", action="store_true", help="Skip CPUID requirements table patch")
-    build_parser.add_argument("--kiset", action="store_true", help="Enable KiSetFeatureBits conditional jump NOPs (disabled by default)")
-    build_parser.add_argument("--debug-loop", action="store_true", help="Enable KeBugCheckEx EB FE infinite loop for QEMU GDB debugging")
-    build_parser.add_argument("--allow-missing-blobs", action="store_true", help="Downgrade missing replacement blobs from fatal error to warning")
-    build_parser.add_argument("--oscdimg-path", default=None, help="Explicit path to oscdimg.exe")
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Build an end-to-end bootable patched Windows 11 ISO (DISM + Blobs + Registry + BCD + oscdimg)",
+        description="Automates the full ISO build pipeline using configurations from badblobs.xml: mounts/extracts ISO media, patches boot.wim, patches install.wim/install.esd, injects replacement blobs, configures offline registry and BCD stores, and masters a dual-boot (UEFI + BIOS) ISO."
+    )
+    build_parser.add_argument("-i", "--input-iso", required=True, metavar="PATH", help="Path to source Windows 11 installation ISO file or an extracted directory containing setup media")
+    build_parser.add_argument("-o", "--output-iso", default="patched_install.iso", metavar="PATH", help="Destination path and filename for the generated bootable patched ISO. [Default: 'patched_install.iso']")
+    build_parser.add_argument("-w", "--work-dir", default=None, metavar="DIR", help="Temporary directory for ISO file staging, WIM mounting, and registry hives. [Default: './build_workspace']")
+    build_parser.add_argument("-c", "--config", default=None, metavar="XML", help="Path to badblobs.xml profile defining patch handlers, replacement blobs, and targets. [Default: './badblobs.xml']")
+    build_parser.add_argument("-b", "--blobs-dir", default=None, metavar="DIR", help="Directory containing binary replacement files (e.g. 23H2 WindowsCodecs.dll). [Default: './blobs']")
+    index_group = build_parser.add_mutually_exclusive_group()
+    index_group.add_argument("--index", default=None, metavar="INDEX", help="Specific Windows edition index in install.wim to patch (e.g. '6' for Windows 11 Pro, 'all' for every edition, or 'none' to skip install.wim entirely). Mutually exclusive with --boot-only. [Default: 'all']")
+    index_group.add_argument("--boot-only", action="store_true", help="Only patch boot.wim (Setup wizard) and completely skip install.wim. Mutually exclusive with --index.")
+    build_parser.add_argument("--clean", action="store_true", help="Force clean extraction of source ISO (wipes existing workspace ISO files)")
+    build_parser.add_argument("--allow-missing-blobs", action="store_true", help="Downgrade missing replacement blob errors from fatal failures to warnings. [Default: False (fail-fast validation)]")
+    build_parser.add_argument("--oscdimg-path", default=None, metavar="PATH", help="Explicit path to oscdimg.exe. If omitted or outdated (< v2.55), automatically searches ADK/MiniTool/PATH or auto-downloads official Microsoft ADK v2.56 (~74 KB)")
 
     # Interactive prompt fallback when run with no arguments or double-clicked
     if len(sys.argv) == 1:
@@ -1010,7 +1159,7 @@ Examples:
             if not k_input or not os.path.exists(k_input):
                 print("[-] Error: Kernel file not found.")
                 sys.exit(1)
-            sys.argv = ["pop42.py", "patch", "ntoskrnl", "-i", k_input]
+            sys.argv = ["pop42.py", "patch", "kernel_sse42", "-i", k_input]
         else:
             sys.exit(0)
 
@@ -1021,20 +1170,42 @@ Examples:
     # Execute Mode 1: PATCH
     # -------------------------------------------------------------------------
     if args.mode == "patch":
-        patch_cpuid = not args.no_cpuid
-        patch_kiset = args.kiset
-        debug_loop = args.debug_loop
+        if args.patcher not in PATCHER_REGISTRY:
+            print(f"[-] Error: Unknown patcher '{args.patcher}'. Available registered patchers: {list(PATCHER_REGISTRY.keys())}")
+            sys.exit(1)
+
+        # Parse key=value options from -O / --option
+        options = {}
+        for opt in args.option:
+            if "=" in opt:
+                k, v = opt.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if v.lower() == "true":
+                    val = True
+                elif v.lower() == "false":
+                    val = False
+                else:
+                    try:
+                        val = int(v)
+                    except ValueError:
+                        val = v
+                options[k] = val
+            else:
+                options[opt.strip()] = True
+
         out_file = args.output if args.output else args.input
 
         print("="*70)
-        print(f"POP4.2 Standalone Patch Mode: '{args.shorthand}'")
+        print(f"POP4.2 Standalone Patch Mode: '{args.patcher}'")
         print(f"  Target:     {args.input}")
-        print(f"  CPUID:      {'Enabled (0x0D -> 0x0C)' if patch_cpuid else 'Disabled'}")
-        print(f"  KiSet Jumps:{'Enabled' if patch_kiset else 'Disabled (Default)'}")
-        print(f"  GDB Loop:   {'Enabled (EB FE)' if debug_loop else 'Disabled'}")
+        print(f"  Output:     {out_file}")
+        if options:
+            print(f"  Options:    {options}")
         print("="*70)
 
-        success = patch_kernel_file(args.input, out_file, patch_cpuid, patch_kiset, debug_loop)
+        handler = PATCHER_REGISTRY[args.patcher]
+        success = handler(args.input, out_file, **options)
         sys.exit(0 if success else 1)
 
     # -------------------------------------------------------------------------
@@ -1052,10 +1223,6 @@ Examples:
         if not db.validate(allow_missing=args.allow_missing_blobs):
             print("[-] Build aborted due to validation errors. Use --allow-missing-blobs to bypass.")
             sys.exit(1)
-
-        patch_cpuid = not args.no_cpuid
-        patch_kiset = args.kiset
-        debug_loop = args.debug_loop
 
         # Resolve index and boot_only mode
         selected_index = None
@@ -1083,9 +1250,7 @@ Examples:
             blobs_dir=blobs_dir,
             selected_index=selected_index,
             boot_only=boot_only,
-            patch_cpuid=patch_cpuid,
-            patch_kiset=patch_kiset,
-            debug_loop=debug_loop,
+            clean=args.clean,
             oscdimg_path=args.oscdimg_path
         )
 

@@ -19,6 +19,12 @@
         <Description>Windows Codecs 64-bit library (Replaces SSE4.1 instructions with 23H2 build)</Description>
     </Blob>
 
+    <!-- Windows Provisioning Tool: In-place bypass for post-install setup crash on SSE4.2 CRC32 -->
+    <Blob id="provtool" action="patch" patcher="provtool_exit" enabled="true">
+        <Target>Windows/System32/provtool.exe</Target>
+        <Description>Windows Provisioning Tool (Exits 0 to bypass SSE4.2 CRC32 crash during Setup)</Description>
+    </Blob>
+
     <!-- Windows Boot Loader: In-place Code Integrity and testsigning bypass (Disabled by default) -->
     <!-- This is experimental and can lead to unbootable ISOs. Only flip to true if you know this'll work for you-->
     <Blob id="winload_boot_efi" action="patch" patcher="winload" enabled="false">

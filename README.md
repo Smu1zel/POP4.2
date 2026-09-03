@@ -33,6 +33,10 @@ If you only need to patch individual binaries directly (e.g. for testing or Wind
   ```bash
   python pop42.py patch winload -i path\to\winload.exe -o path\to\winload_patched.exe
   ```
+* **Patch the Provisioning Tool (`provtool.exe`):**
+  ```bash
+  python pop42.py patch provtool_exit -i path\to\provtool.exe -o path\to\provtool_patched.exe
+  ```
 > [!NOTE]
 > If `-o` is omitted, the input file will be modified and overwritten in-place.
 

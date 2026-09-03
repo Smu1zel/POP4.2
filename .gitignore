@@ -9,3 +9,6 @@ __pycache__/
 *.exe
 *.iso
 *.dll
+*.i64
+*.idb
+*.pdb

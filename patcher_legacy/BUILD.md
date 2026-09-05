@@ -24,7 +24,7 @@ git clone https://github.com/Smu1zel/POP4.2
 4. Enter the patcher directory. 
 
 ```
-cd POP4.2/patcher
+cd POP4.2/patcher_legacy
 ```
 
 5. Compile the program.

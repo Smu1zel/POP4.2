@@ -2,7 +2,7 @@
 This is an experimental patcher that allows CPUs *with* POPCNT, but *without* SSE4.2 (such as the AMD Phenom and K10 lines of CPUs) to boot Windows 11 24H2 and beyond. It has been tested on Windows 11 25H2 v2. Other builds have not been tested, but should work.
 
 ## What? Windows 11 needs that. This is impossible!
-Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not actually need SSE4.2 for 99% of its files, with only a singular exception that can be worked around (read on). To enforce this, Microsoft uses the undocumented `RtlDetectProcessorFeatures` function and checks for requirements by reading data from `.rdata`. In kernel 26100.7171, this is at offset `00000001400088C0` and has the bytes `01 00 00 00 00 00 00 00 00 00 10 00 02 00 00 00 0D 00 00 00` in IDA. To defeat this, we simply flip that `0D` to a `0C`, telling Windows to effectively skip the check and continue booting.
+Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not actually need SSE4.2 for 99% of its files, with only a few exceptions that can be worked around (read on). To enforce this, Microsoft uses the undocumented `RtlDetectProcessorFeatures` function and checks for requirements by reading data from `.rdata`. In kernel 26100.7171, this is at offset `00000001400088C0` and has the bytes `01 00 00 00 00 00 00 00 00 00 10 00 02 00 00 00 0D 00 00 00` in IDA. To defeat this, we simply flip that `0D` to a `0C`, telling Windows to effectively skip the check and continue booting.
 
 ## Prerequisites
 - Windows 8 or newer
@@ -11,7 +11,7 @@ Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not ac
   pip install pefile
   ```
 - Windows ADK (Deployment Tools) for `oscdimg.exe`. It will be automatically downloaded if missing.
-- A copy of `WindowsCodecs.dll` (64-bit) extracted from Windows 11 23H2 placed into the `blobs/` directory (see *"Why WindowsCodecs.dll?"* below).
+- A copy of `WindowsCodecs.dll` (64-bit) and `msxml6.dll` (both 64-bit and 32-bit) extracted from Windows 11 23H2 placed into the `blobs/` directory (see *"Why do I need DLLs?"* below). The 32-bit WOW64 variant of msxml6.dll must be renamed to "msxml6_wow64.dll".
 
 ## Usage
 
@@ -42,15 +42,18 @@ If you only need to patch individual binaries directly (e.g. for testing or Wind
 
 ### 3. Legacy C Patcher
 > [!IMPORTANT]
-> This patcher is deprecated. You probably want to use the Nuitka-compiled Python script instead.
+> This patcher is deprecated. You probably want to use the Nuitka-compiled Python script instead for PE.
 
 This can be found in the `patcher_legacy` folder of this repository. It's a standard Win32 app that should execute
 on basically anything that can run a Win32 executable.
 
 ---
 
-## Why WindowsCodecs.dll?
-For some reason, Microsoft compiled this specific DLL with SSE4.1 instructions (`PMOVSXBW`). If you do not replace it, Windows Setup will crash and restart when attempting to execute it. Even if you deploy the WIM manually, Windows will later enter Automatic Recovery since it tries to execute setup.exe again to finish installing. For these reasons, replacing this file with the 23H2 version in `blobs/` is required.
+## Why do I need DLLs?
+For some reason, Microsoft compiled `WindowsCodecs.dll` and `msxml6.dll` with SSE4.1 instructions (`PMOVSXBW` and `PMOVZXBW`). If you do not replace `WindowsCodecs.dll`, Windows Setup will crash and restart when attempting to execute it.
+Even if you deploy the WIM manually, Windows will later enter Automatic Recovery as it tries to execute setup.exe again to finish installing.
+Likewise, skipping `msxml6.dll` will cause Windows to appear to install, but later fail to register *any* AppX package, resulting in "Why did my PC restart?" and a very broken install that can't even start explorer.
+For these reasons, replacing these files with their 23H2 versions in `blobs/` is required.
 
 ## Customizing Blobs (`badblobs.xml`)
 POP4.2 tracks problematic binaries using `badblobs.xml`. Each entry defines target paths and actions (`patch`, `replace`, `ignore`). You can customize or add replacement blobs by editing `badblobs.xml`.

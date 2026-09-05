@@ -5,28 +5,47 @@
         <Target>Windows/System32/ntoskrnl.exe</Target>
         <Description>Windows 11's NT Kernel (Bypasses SSE4.2 CPUID requirement table check)</Description>
         <Options>
-            <!-- You probably don't need to change any of these, but they can be useful for debugging-->
+            <!-- You probably don't need to change any of these, but they can be useful for debugging -->
             <Option name="patch_cpuid" value="true" />
             <Option name="patch_kiset" value="false" />
-            <!-- This indirectly disables bugchecks/BSODs. Do not enable unless you are debugging-->
+            <!-- This indirectly disables bugchecks/BSODs. Do not enable unless you are debugging in QEMU. This will not help you resolve BSODs. -->
             <Option name="debug_loop" value="false" />
         </Options>
     </Blob>
 
     <!-- Windows Codecs 64-bit library: Replaces SSE4.1 PMOVSXBW build with 23H2 binary -->
+    <!-- Windows Setup will immediately close without this -->
     <Blob id="wincodecs" action="replace" file="WindowsCodecs.dll" enabled="true">
         <Target>Windows/System32/WindowsCodecs.dll</Target>
         <Description>Windows Codecs 64-bit library (Replaces SSE4.1 instructions with 23H2 build)</Description>
     </Blob>
+	
+    <!-- MSXML6 64-bit library: Replaces SSE4.1 PMOVZXBW build with 23H2 binary -->
+    <!-- If this is removed, you WILL get a broken "Why did my PC restart?" install on newer 24H2 versions -->
+    <Blob id="msxml6" action="replace" file="msxml6.dll" enabled="true">
+        <Target>Windows/System32/msxml6.dll</Target>
+        <Description>MSXML6 64-bit library (Replaces SSE4.1 instructions with 23H2 build)</Description>
+    </Blob>
+	
+		
+    <!-- MSXML6 WOW64 library: Replaces SSE4.1 PMOVZXBW build with 23H2 binary -->
+    <!-- Not absolutely needed for installation, but 32-bit apps that use msxml6 are guaranteed to break otherwise -->
+    <Blob id="msxml6_wow64" action="replace" file="msxml6_wow64.dll" enabled="true">
+        <Target>Windows/SysWOW64/msxml6.dll</Target>
+        <Description>MSXML6 WOW64 library (Replaces SSE4.1 instructions with 23H2 build)</Description>
+    </Blob>
 
-    <!-- Windows Provisioning Tool: In-place bypass for post-install setup crash on SSE4.2 CRC32 -->
+    <!-- Windows Provisioning Tool: Workaround for post-install provtool crash on NTDLL's SSE4.2 CRC32 -->
+    <!-- This is a hack that tricks Windows Setup into thinking provtool succeeded, without it actually doing anything -->
+    <!-- Unless you actually need provtool (you likely don't), leave this enabled to avoid install issues -->
     <Blob id="provtool" action="patch" patcher="provtool_exit" enabled="true">
         <Target>Windows/System32/provtool.exe</Target>
         <Description>Windows Provisioning Tool (Exits 0 to bypass SSE4.2 CRC32 crash during Setup)</Description>
     </Blob>
 
-    <!-- Windows Boot Loader: In-place Code Integrity and testsigning bypass (Disabled by default) -->
-    <!-- This is experimental and can lead to unbootable ISOs. Only flip to true if you know this'll work for you-->
+    <!-- Windows Boot Loader: In-place Code Integrity and testsigning/nointegritychecks strip bypass (disabled by default) -->
+    <!-- This series, if enabled, allows you to boot Windows normally without F8, as if nothing was patched -->
+    <!-- This is experimental and can lead to unbootable ISOs. Only flip to true if you are willing to gamble with your build -->
     <Blob id="winload_boot_efi" action="patch" patcher="winload" enabled="false">
         <Target>Windows/System32/boot/winload.efi</Target>
         <Description>Windows Boot Loader UEFI (Bypasses CI check and preserves testsigning without F8)</Description>

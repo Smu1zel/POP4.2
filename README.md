@@ -6,7 +6,7 @@ Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not ac
 
 ## Prerequisites
 - Windows 8 or newer
-- Python 3.9+ with `pefile`:
+- Python 3.7+ with `pefile`:
   ```bash
   pip install pefile
   ```

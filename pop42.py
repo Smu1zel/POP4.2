@@ -1022,7 +1022,7 @@ def build_iso(
         clear_readonly(install_img)
 
         # Query all image indexes using DISM
-        info_res = subprocess.run(["dism.exe", "/Get-ImageInfo", f"/ImageFile:{install_img}"], capture_output=True, text=True)
+        info_res = subprocess.run(["dism.exe", "/English", "/Get-ImageInfo", f"/ImageFile:{install_img}"], capture_output=True, text=True)
         found_indexes = [int(m.group(1)) for m in re.finditer(r"(?i)Index\s*:\s*(\d+)", info_res.stdout)]
 
         if not found_indexes:
@@ -1038,7 +1038,7 @@ def build_iso(
                 os.remove(local_install_wim)
             for idx in target_indexes:
                 print(f"  [+] Exporting Index {idx}...")
-                subprocess.run(["dism.exe", "/Export-Image", f"/SourceImageFile:{install_img}", f"/SourceIndex:{idx}", f"/DestinationImageFile:{local_install_wim}", "/Compress:max"], check=True)
+                subprocess.run(["dism.exe", "/English", "/Export-Image", f"/SourceImageFile:{install_img}", f"/SourceIndex:{idx}", f"/DestinationImageFile:{local_install_wim}", "/Compress:max"], check=True)
             wim_indexes = list(range(1, len(target_indexes) + 1))
         else:
             shutil.copy2(install_img, local_install_wim)

@@ -868,9 +868,8 @@ def find_oscdimg(custom_path: str = None) -> str:
 def modify_bcd_stores(iso_files_dir: str):
     """
     Configures both BIOS (boot\\bcd) and UEFI (efi\\microsoft\\boot\\bcd) BCD stores on the ISO:
-    1. Disables integrity checks and enables testsigning for the boot loader ({default}).
-    2. Enables the legacy F8 boot menu (bootmenupolicy legacy) so users can select
-       'Disable driver signature enforcement' at boot time.
+    1. Disables integrity checks for the boot loader ({default}).
+    2. Enables the legacy F8 boot menu (bootmenupolicy legacy) so users can so loading bar progress in real time.
     """
     bcd_paths = [
         os.path.join(iso_files_dir, "boot", "bcd"),
@@ -887,9 +886,6 @@ def modify_bcd_stores(iso_files_dir: str):
 
             commands = [
                 ["bcdedit.exe", "/store", bcd, "/set", "{default}", "nointegritychecks", "Yes"],
-                ["bcdedit.exe", "/store", bcd, "/set", "{default}", "testsigning", "Yes"],
-                ["bcdedit.exe", "/store", bcd, "/set", "{default}", "recoveryenabled", "Yes"],
-                ["bcdedit.exe", "/store", bcd, "/set", "{default}", "advancedoptions", "Yes"],
                 ["bcdedit.exe", "/store", bcd, "/set", "{default}", "bootmenupolicy", "legacy"]
             ]
             for c in commands:

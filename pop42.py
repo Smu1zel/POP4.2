@@ -869,7 +869,7 @@ def modify_bcd_stores(iso_files_dir: str):
     """
     Configures both BIOS (boot\\bcd) and UEFI (efi\\microsoft\\boot\\bcd) BCD stores on the ISO:
     1. Disables integrity checks for the boot loader ({default}).
-    2. Enables the legacy F8 boot menu (bootmenupolicy legacy) so users can so loading bar progress in real time.
+    2. Enables the legacy F8 boot menu (bootmenupolicy legacy) so users can see its loading bar progress in real time.
     """
     bcd_paths = [
         os.path.join(iso_files_dir, "boot", "bcd"),

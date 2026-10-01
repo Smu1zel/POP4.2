@@ -1,5 +1,5 @@
 # POP4.2
-This is an experimental patcher that allows CPUs *with* POPCNT, but *without* SSE4.2 (such as the AMD Phenom and K10 lines of CPUs) to boot Windows 11 24H2 and beyond. It has been tested on Windows 11 25H2 v2. Other builds have not been tested, but should work.
+This is an experimental patcher that allows CPUs *with* POPCNT, but *without* SSE4.2 (such as the AMD Phenom and K10 lines of CPUs) to boot Windows 11 24H2 and beyond. It has been tested on Windows 11 25H2 v2 and 26H2. Other builds have not been tested, but should work.
 
 ## What? Windows 11 needs that. This is impossible!
 Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not actually need SSE4.2 for 99% of its files, with only a few exceptions that can be worked around (read on). To enforce this, Microsoft uses the undocumented `RtlDetectProcessorFeatures` function and checks for requirements by reading data from `.rdata`. In kernel 26100.7171, this is at offset `00000001400088C0` and has the bytes `01 00 00 00 00 00 00 00 00 00 10 00 02 00 00 00 0D 00 00 00` in IDA. To defeat this, we simply flip that `0D` to a `0C`, telling Windows to effectively skip the check and continue booting.

@@ -76,5 +76,10 @@ POP4.2 tracks problematic binaries using `badblobs.xml`. Each entry defines targ
 - IDA, for their invaluable disassembler.
 - Microsoft, for Windows 11.
 
+## Third-Party Licenses & Notices
+- **pefile**: Licensed under the MIT License (c) 2004-2024 Ero Carrera. See [LICENSE.PEFILE](LICENSE.PEFILE) for details.
+- **Windows Binaries**: Any Windows binary files placed in `blobs\`, or downloaded from the Windows ADK, remain the property and copyright of Microsoft Corporation.
+- This project performs unofficial modifications not supported—nor endorsed—by Microsoft Corporation.
+
 ## License
-This program, its accompanying files, and all files otherwise included in this repository are licensed under the MIT License. Consult the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License—see the [LICENSE](LICENSE) file for details.

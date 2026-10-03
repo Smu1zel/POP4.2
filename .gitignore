@@ -2,6 +2,7 @@
 /pop42.build
 /pop42.dist
 /pop42.onefile-build
+/dist
 /build_workspace
 /tools
 __pycache__/

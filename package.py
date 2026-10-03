@@ -114,6 +114,12 @@ def build_executable(python_exe: str, root_dir: Path, build_dir: Path) -> Path:
         "--include-package=pefile",
         f"--output-dir={build_dir}",
         "--remove-output",
+        "--python-flag=-O",
+        "--python-flag=no_site",
+        "--mingw64",
+        "--lto=yes",
+        "--noinclude-setuptools-mode=nofollow",
+        "--noinclude-pytest-mode=nofollow",
         str(script_path),
     ]
 

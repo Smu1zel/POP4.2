@@ -6,7 +6,7 @@ Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not ac
 
 ## Prerequisites
 - Windows 8 or newer
-- Python 3.7+ with `pefile`:
+- If running from source, Python 3.7+ with `pefile`:
   ```bash
   pip install pefile
   ```
@@ -16,9 +16,12 @@ Yes and no. While Windows 11 checks for *both* POPCNT and SSE4.2, it does not ac
 ## Usage
 
 ### 1. Build a Full Patched ISO (Recommended)
+> [!IMPORTANT]
+> Substitute `pop42.exe` with `python pop42.py` if running from source.
+
 You can build a bootable dual-boot (UEFI + BIOS) patched ISO from your original Windows 11 ISO with a single command:
 ```bash
-python pop42.py build -i Win11_24H2_English_x64.iso -o Win11_Patched.iso --clean --index <index_number>
+pop42.exe build -i Win11_24H2_English_x64.iso -o Win11_Patched.iso --clean --index <index_number>
 ```
 > [!NOTE]
 > This command will automatically request Administrator elevation to manage WIM mounts and offline registry hives.
@@ -27,15 +30,15 @@ python pop42.py build -i Win11_24H2_English_x64.iso -o Win11_Patched.iso --clean
 If you only need to patch individual binaries directly (e.g. for testing or Windows PE):
 * **Patch the NT Kernel (`ntoskrnl.exe`):**
   ```bash
-  python pop42.py patch kernel_sse42 -i path\to\ntoskrnl.exe -o path\to\ntoskrnl_patched.exe
+  pop42.exe patch kernel_sse42 -i path\to\ntoskrnl.exe -o path\to\ntoskrnl_patched.exe
   ```
 * **Patch the Boot Loader (`winload.efi` / `winload.exe`):**
   ```bash
-  python pop42.py patch winload -i path\to\winload.exe -o path\to\winload_patched.exe
+  pop42.exe patch winload -i path\to\winload.exe -o path\to\winload_patched.exe
   ```
 * **Patch the Provisioning Tool (`provtool.exe`):**
   ```bash
-  python pop42.py patch provtool_exit -i path\to\provtool.exe -o path\to\provtool_patched.exe
+  pop42.exe patch provtool_exit -i path\to\provtool.exe -o path\to\provtool_patched.exe
   ```
 > [!NOTE]
 > If `-o` is omitted, the input file will be modified and overwritten in-place.

@@ -7,6 +7,7 @@ Compiles pop42.py into a standalone onefile Windows executable using Python 3.8
 (to make Windows 8 work) and Nuitka, then bundles it into a release zip archive
 containing:
   - pop42.exe
+  - badblobs.xml
   - LICENSE
   - LICENSE.PEFILE
   - blobs/README.txt
@@ -118,6 +119,7 @@ def build_executable(python_exe: str, root_dir: Path, build_dir: Path) -> Path:
         "--python-flag=no_site",
         "--mingw64",
         "--lto=yes",
+        "--windows-uac-admin",
         "--noinclude-setuptools-mode=nofollow",
         "--noinclude-pytest-mode=nofollow",
         str(script_path),
@@ -151,6 +153,7 @@ def create_release_zip(root_dir: Path, exe_path: Path, output_zip: Path):
     """
     required_files = [
         (exe_path, "pop42.exe"),
+        (root_dir / "badblobs.xml", "badblobs.xml"),
         (root_dir / "LICENSE", "LICENSE"),
         (root_dir / "LICENSE.PEFILE", "LICENSE.PEFILE"),
         (root_dir / "blobs" / "README.txt", "blobs/README.txt"),

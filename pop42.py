@@ -68,6 +68,26 @@ def is_admin() -> bool:
         return False
 
 
+def get_app_dir() -> str:
+    """
+    Returns the root directory where the application/script resides.
+    Handles Nuitka onefile / standalone binaries, PyInstaller, and raw Python execution.
+    """
+    if "NUITKA_ONEFILE_BINARY" in os.environ:
+        return os.path.dirname(os.path.abspath(os.environ["NUITKA_ONEFILE_BINARY"]))
+
+    if "__compiled__" in globals() or getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"):
+        return os.path.dirname(os.path.abspath(sys.executable))
+
+    file_dir = os.path.dirname(os.path.abspath(__file__))
+    if "onefile_" in file_dir or "temp" in file_dir.lower():
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        if os.path.exists(os.path.join(exe_dir, "badblobs.xml")):
+            return exe_dir
+
+    return file_dir
+
+
 def require_admin():
     """
     Ensures the script is running with elevated Administrator privileges.
@@ -824,8 +844,8 @@ def find_oscdimg(custom_path: str = None) -> str:
     4. If found version is < 2.55, warns the user that El Torito dual-boot is unsupported.
     5. If not found or too old, automatically downloads the 74 KB ADK payload from Microsoft.
     """
-    script_dir = os.path.abspath(os.path.dirname(__file__))
-    tools_dir = os.path.join(script_dir, "tools")
+    app_dir = get_app_dir()
+    tools_dir = os.path.join(app_dir, "tools")
     local_tool = os.path.join(tools_dir, "oscdimg.exe")
 
     # 1. User-supplied custom path
@@ -1235,7 +1255,7 @@ COMMON USAGE EXAMPLES:
             sys.exit(0)
 
     args = parser.parse_args()
-    script_dir = os.path.abspath(os.path.dirname(__file__))
+    app_dir = get_app_dir()
 
     # -------------------------------------------------------------------------
     # Execute Mode 1: PATCH
@@ -1283,9 +1303,24 @@ COMMON USAGE EXAMPLES:
     # Execute Mode 2: BUILD
     # -------------------------------------------------------------------------
     elif args.mode == "build":
-        xml_path = args.config if args.config else os.path.join(script_dir, "badblobs.xml")
-        blobs_dir = args.blobs_dir if args.blobs_dir else os.path.join(script_dir, "blobs")
-        work_dir = args.work_dir if args.work_dir else os.path.join(script_dir, "build_workspace")
+        if args.config:
+            xml_path = args.config
+        elif os.path.exists("badblobs.xml"):
+            xml_path = os.path.abspath("badblobs.xml")
+        else:
+            xml_path = os.path.join(app_dir, "badblobs.xml")
+
+        if args.blobs_dir:
+            blobs_dir = args.blobs_dir
+        elif os.path.isdir("blobs"):
+            blobs_dir = os.path.abspath("blobs")
+        else:
+            blobs_dir = os.path.join(app_dir, "blobs")
+
+        if args.work_dir:
+            work_dir = args.work_dir
+        else:
+            work_dir = os.path.join(app_dir, "build_workspace")
 
         db = BlobDatabase(xml_path, blobs_dir)
         print(f"[*] Loaded {len(db.blobs)} blob entries from {xml_path}.")

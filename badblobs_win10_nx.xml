@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<BadBlobs>
+    <!-- Windows NT Kernel: In-place NX (No-Execute) requirement bypass patch -->
+    <Blob id="ntoskrnl" action="patch" patcher="kernel_nx" enabled="true">
+        <Target>Windows/System32/ntoskrnl.exe</Target>
+        <Description>Windows 10's x86 NT Kernel (Bypasses NX / No-Execute bit requirement)</Description>
+        <Options>
+            <!-- Bypasses KF_NX (0x20000000) check in KiInitializeProcessor -->
+            <Option name="patch_nx" value="true" />
+            <!-- Optional KeBugCheckEx infinite loop for QEMU GDB debugging -->
+            <Option name="debug_loop" value="false" />
+        </Options>
+    </Blob>
+
+    <!-- Windows Boot Loader: In-place NX bypass and EFER.NXE safety patch -->
+    <Blob id="winload_boot_exe" action="patch" patcher="winload_nx" enabled="true">
+        <Target>Windows/System32/boot/winload.exe</Target>
+        <Description>Windows Boot Loader Legacy BIOS Boot (Bypasses NX initialization and EFER.NXE fault)</Description>
+        <Options>
+            <Option name="patch_nx" value="true" />
+            <Option name="patch_msr_fallback" value="true" />
+            <Option name="patch_ci_filter" value="true" />
+        </Options>
+    </Blob>
+
+    <Blob id="winload_sys32_exe" action="patch" patcher="winload_nx" enabled="true">
+        <Target>Windows/System32/winload.exe</Target>
+        <Description>Windows Boot Loader Legacy BIOS System32 (Bypasses NX initialization and EFER.NXE fault)</Description>
+        <Options>
+            <Option name="patch_nx" value="true" />
+            <Option name="patch_msr_fallback" value="true" />
+            <Option name="patch_ci_filter" value="true" />
+        </Options>
+    </Blob>
+
+    <!-- BCD Store Configuration -->
+    <!-- Commands executed against both BIOS (boot\bcd) and UEFI (efi\microsoft\boot\bcd) stores via bcdedit -->
+    <Bcd>
+        <Command>/set {default} nointegritychecks Yes</Command>
+        <Command>/set {default} testsigning Yes</Command>
+        <Command>/set {default} recoveryenabled Yes</Command>
+        <Command>/set {default} advancedoptions Yes</Command>
+        <Command>/set {default} bootmenupolicy legacy</Command>
+    </Bcd>
+</BadBlobs>

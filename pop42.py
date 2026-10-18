@@ -365,6 +365,96 @@ def patch_kernel_file(input_path: str, output_path: str = None, patch_cpuid: boo
     return True
 
 
+def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: bool = False) -> tuple:
+    """
+    Applies the NX (No-Execute) requirement bypass patch to a raw 32-bit x86 Windows NT kernel bytearray:
+    
+    In KiInitializeProcessor, the kernel verifies that mandatory CPU features are present:
+      mov ecx, 0x20013cb6
+      and eax, ecx
+      cmp eax, ecx
+      jne BugCheck  ; 0x5D on BSP, 0x3E on APs
+      
+    Bit 29 (0x20000000) corresponds to KF_NX. If the CPU lacks NX/XD support, this check fails.
+    Changing the mask from 0x20013CB6 to 0x00013CB6 (B9 B6 3C 01 20 -> B9 B6 3C 01 00) converts
+    KF_NX into an optional feature, allowing the system to boot without NX.
+    """
+    report = {
+        "nx_patched": False,
+        "debug_loop_patched": False
+    }
+
+    if patch_nx:
+        # Signature: mov ecx, 0x20013cb6; and eax, ecx; cmp eax, ecx
+        pattern_0x20 = re.compile(b'\xB9\xB6\x3C\x01\x20\x23\xC1\x3B\xC1')
+        pattern_0x00 = re.compile(b'\xB9\xB6\x3C\x01\x00\x23\xC1\x3B\xC1')
+
+        matches = list(pattern_0x20.finditer(data))
+        if matches:
+            for m in matches:
+                start = m.start()
+                data[start + 4] = 0x00
+                print(f"[+] Patched KiInitializeProcessor mandatory feature mask at offset 0x{start:X} (0x20013CB6 -> 0x00013CB6).")
+            report["nx_patched"] = True
+        else:
+            already_patched = list(pattern_0x00.finditer(data))
+            if already_patched:
+                report["nx_patched"] = True
+                print("[*] Notice: KiInitializeProcessor mandatory feature mask is already patched (0x00013CB6).")
+            else:
+                print("[-] Warning: Mandatory NX feature check signature (0x20013CB6) not found in binary.")
+
+    # Optional KeBugCheckEx infinite loop patch (EB FE) for QEMU GDB debugging
+    if enable_debug:
+        try:
+            pe = pefile.PE(data=bytes(data))
+            kbc_rva = None
+            if hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
+                for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+                    if exp.name and exp.name.decode('latin1', errors='ignore') == 'KeBugCheckEx':
+                        kbc_rva = exp.address
+                        break
+            if kbc_rva:
+                kbc_offset = pe.get_offset_from_rva(kbc_rva)
+                data[kbc_offset : kbc_offset + 2] = b'\xEB\xFE'
+                report["debug_loop_patched"] = True
+                print(f"[+] Patched KeBugCheckEx at offset 0x{kbc_offset:X} (RVA 0x{kbc_rva:X}) to EB FE infinite loop.")
+            pe.close()
+        except Exception as e:
+            print(f"[-] Warning: Failed to patch KeBugCheckEx debug loop: {e}")
+
+    return data, report
+
+
+@register_patcher("kernel_nx")
+def patch_kernel_nx_file(input_path: str, output_path: str = None, patch_nx: bool = True, debug_loop: bool = False, enable_debug: bool = False, **kwargs) -> bool:
+    """
+    Registered patch routine for Windows Kernel ('kernel_nx').
+    Patches KiInitializeProcessor to allow booting Windows 10 x86 without the NX (No-Execute) bit.
+    """
+    if not os.path.exists(input_path):
+        print(f"[-] Error: Kernel file not found: {input_path}")
+        return False
+
+    if output_path is None:
+        output_path = input_path
+
+    is_debug = debug_loop or enable_debug
+    print(f"[*] Reading kernel binary: {input_path}")
+    with open(input_path, "rb") as f:
+        data = bytearray(f.read())
+
+    modified_data, report = patch_kernel_nx_bytes(data, patch_nx, is_debug)
+
+    with open(output_path, "wb") as f:
+        f.write(modified_data)
+
+    print(f"[+] Written patched binary to: {output_path}")
+    if fix_pe_checksum(output_path):
+        print("[+] Recalculated and updated PE Checksum successfully.")
+    return True
+
+
 def patch_winload_bytes(data: bytearray, patch_ci_filter: bool = True, patch_boot_options: bool = True) -> tuple:
     """
     Applies the winload Code Integrity (CI) and boot options bypass modifications:
@@ -454,6 +544,146 @@ def patch_winload_file(input_path: str, output_path: str = None, patch_ci_filter
         data = bytearray(f.read())
 
     modified_data, report = patch_winload_bytes(data, patch_ci_filter, patch_boot_options)
+
+    with open(output_path, "wb") as f:
+        f.write(modified_data)
+
+    print(f"[+] Written patched binary to: {output_path}")
+    if fix_pe_checksum(output_path):
+        print("[+] Recalculated and updated PE Checksum successfully.")
+    return True
+
+
+def patch_winload_nx_bytes(
+    data: bytearray,
+    patch_nx: bool = True,
+    patch_msr_fallback: bool = True,
+    patch_ci_filter: bool = False
+) -> tuple:
+    """
+    Applies the NX (No-Execute) compatibility patches to a raw 32-bit x86 winload.exe bytearray:
+
+    1. BlpLibraryParameters NX Flag Bypass (Primary / Option A):
+       In OslMain, winload sets library initialization flags:
+         mov dword ptr [esp + 0x48], 0x1A014  ; C7 44 24 48 14 A0 01 00
+       Bit 16 (0x10000) corresponds to LF_ENABLE_NX.
+       Patching 0x1A014 to 0x0A014 (14 A0 01 00 -> 14 A0 00 00) signals winload to skip
+       all NX configuration:
+       - ArchInitializeProcessorFeatures skips reading MSR 0x1A0 and writing MSR 0xC0000080 (EFER.NXE).
+       - ArchRestoreProcessorFeatures skips restoring EFER.
+       - BlpArchQueryCurrentAddressSpace / ArchFilterPage does not set bit 63 (XD) on page table entries.
+
+    2. EFER WRMSR Safety Fallback (Defensive / Option B):
+       NOPs out WRMSR (0F 30 -> 90 90) at:
+       - ArchInitializeProcessorFeatures: or eax, 0x800; ...; wrmsr
+       - ArchRestoreProcessorFeatures: and eax, ~0x800; wrmsr
+       Prevents fatal #GP / triple-fault if MSR operations are ever reached.
+
+    3. Code Integrity Validation Filter Bypass (Optional):
+       In ImgpFilterValidationFailure, replaces prologue with:
+         xor eax, eax  ; 31 C0
+         ret 4         ; C2 04 00 (clean up 1 stack argument in 32-bit __fastcall)
+       Forces STATUS_SUCCESS (0), allowing patched ntoskrnl.exe to boot without
+       requiring manual 'Disable driver signature enforcement' from the F8 menu.
+    """
+    report = {
+        "nx_flag_patched": False,
+        "nx_flag_already_patched": False,
+        "msr_init_patched": False,
+        "msr_restore_patched": False,
+        "ci_filter_patched": False,
+        "ci_filter_already_patched": False,
+    }
+
+    if patch_nx:
+        # Match mov dword ptr [esp+...], 0x1A014
+        pattern_flag = re.compile(rb'(\xC7[\x44\x45].{1,2}\x14\xA0)\x01\x00')
+        pattern_already = re.compile(rb'(\xC7[\x44\x45].{1,2}\x14\xA0)\x00\x00')
+        m = pattern_flag.search(data)
+        if m:
+            idx = m.end() - 2
+            data[idx] = 0x00
+            report["nx_flag_patched"] = True
+            print(f"[+] Patched OslMain BlpLibraryParameters NX flag at offset 0x{idx:X} (0x1A014 -> 0x0A014).")
+        elif pattern_already.search(data):
+            report["nx_flag_already_patched"] = True
+            print("[*] Notice: OslMain BlpLibraryParameters NX flag is already patched (0x0A014).")
+        else:
+            print("[-] Warning: OslMain BlpLibraryParameters NX flag pattern (0x1A014) not found in winload.")
+
+    if patch_msr_fallback:
+        # ArchInitializeProcessorFeatures WRMSR: or eax, 0x800; ...; wrmsr
+        m1 = re.search(rb'\x0D\x00\x08\x00\x00.{1,15}\x0F\x30', data)
+        if m1:
+            wrmsr_idx = m1.end() - 2
+            data[wrmsr_idx : wrmsr_idx + 2] = b'\x90\x90'
+            report["msr_init_patched"] = True
+            print(f"[+] NOPed out ArchInitializeProcessorFeatures EFER WRMSR at offset 0x{wrmsr_idx:X}.")
+        else:
+            if re.search(rb'\x0D\x00\x08\x00\x00.{1,15}\x90\x90', data):
+                print("[*] Notice: ArchInitializeProcessorFeatures EFER WRMSR is already NOPed.")
+            else:
+                print("[-] Notice: ArchInitializeProcessorFeatures EFER WRMSR pattern not found.")
+
+        # ArchRestoreProcessorFeatures WRMSR: and eax, ~0x800; wrmsr
+        m2 = re.search(rb'\x25\xFF\xF7\xFF\xFF\x0F\x30', data)
+        if m2:
+            wrmsr_idx2 = m2.end() - 2
+            data[wrmsr_idx2 : wrmsr_idx2 + 2] = b'\x90\x90'
+            report["msr_restore_patched"] = True
+            print(f"[+] NOPed out ArchRestoreProcessorFeatures EFER WRMSR at offset 0x{wrmsr_idx2:X}.")
+        else:
+            if re.search(rb'\x25\xFF\xF7\xFF\xFF\x90\x90', data):
+                print("[*] Notice: ArchRestoreProcessorFeatures EFER WRMSR is already NOPed.")
+            else:
+                print("[-] Notice: ArchRestoreProcessorFeatures EFER WRMSR pattern not found.")
+
+    if patch_ci_filter:
+        filter_sig = bytes.fromhex("8BFF558BEC515153568BF2894DFC5733FF8BDE81FE280400C0")
+        filter_idx = data.find(filter_sig)
+        if filter_idx != -1:
+            data[filter_idx : filter_idx + 5] = bytes.fromhex("31C0C20400")
+            report["ci_filter_patched"] = True
+            print(f"[+] Patched ImgpFilterValidationFailure at offset 0x{filter_idx:X} (31 C0 C2 04 00 -> force STATUS_SUCCESS).")
+        elif data.find(bytes.fromhex("31C0C20400")) != -1:
+            report["ci_filter_already_patched"] = True
+            print("[*] Notice: ImgpFilterValidationFailure is already patched.")
+        else:
+            print("[-] Warning: ImgpFilterValidationFailure signature not found in winload.")
+
+    return data, report
+
+
+@register_patcher("winload_nx")
+def patch_winload_nx_file(
+    input_path: str,
+    output_path: str = None,
+    patch_nx: bool = True,
+    patch_msr_fallback: bool = True,
+    patch_ci_filter: bool = False,
+    **kwargs
+) -> bool:
+    """
+    Registered patch routine for Windows Boot Loader ('winload_nx').
+    Disables NX initialization in winload to allow booting Windows 10 x86 on CPUs without NX.
+    """
+    if not os.path.exists(input_path):
+        print(f"[-] Error: Winload file not found: {input_path}")
+        return False
+
+    if output_path is None:
+        output_path = input_path
+
+    print(f"[*] Reading winload binary: {input_path}")
+    with open(input_path, "rb") as f:
+        data = bytearray(f.read())
+
+    modified_data, report = patch_winload_nx_bytes(
+        data,
+        patch_nx=patch_nx,
+        patch_msr_fallback=patch_msr_fallback,
+        patch_ci_filter=patch_ci_filter
+    )
 
     with open(output_path, "wb") as f:
         f.write(modified_data)

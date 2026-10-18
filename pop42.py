@@ -439,6 +439,20 @@ def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: 
                 print(f"[+] NOPed out forced XD bit write in shadow PTE routine at offset 0x{s_off:X}.")
             report["shadow_xd_patched"] = True
 
+        # 4. Suppress shifted XD bit writes (or edx, 0xFF800000; ...; shld edx, eax, 8):
+        # In MiProtectSharedUserPage and other PTE constructors, the compiler sets
+        # 0xFF800000 in edx and shifts it left by 8 via 'shld edx, eax, 8' (0xFF800000 << 8 = 0x80000000).
+        # Changing 0xFF800000 to 0xFF000000 causes all 8 bits to shift out, leaving bit 31 = 0
+        pat_shld_nx = re.compile(rb'(\x81\xCA\x00\x00)\x80(\xFF.{0,12}\x0F\xA4\xC2\x08)', re.DOTALL)
+        shld_matches = list(pat_shld_nx.finditer(data))
+        if shld_matches:
+            for m in shld_matches:
+                # Offset +4 is the 0x80 byte in '81 CA 00 00 80 FF'
+                byte_off = m.start() + 4
+                data[byte_off] = 0x00
+                print(f"[+] Cleared shifted NX bit (0xFF800000 -> 0xFF000000) at offset 0x{byte_off:X}.")
+            report["shld_nx_patched"] = True
+
     # Optional KeBugCheckEx infinite loop patch (EB FE) for QEMU GDB debugging
     if enable_debug:
         try:

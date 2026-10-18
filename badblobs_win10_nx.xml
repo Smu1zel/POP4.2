@@ -33,11 +33,39 @@
         </Options>
     </Blob>
 
+    <!-- Windows Hardware Abstraction Layer (HAL): In-place NX bypass and PTE XD bit 63 suppression -->
+    <Blob id="hal" action="patch" patcher="hal_nx" enabled="true">
+        <Target>Windows/System32/hal.dll</Target>
+        <Description>Windows Hardware Abstraction Layer (Bypasses AP NX trampoline and PTE bit 63 fault)</Description>
+        <Options>
+            <Option name="patch_pte" value="true" />
+            <Option name="patch_ap_trampoline" value="true" />
+        </Options>
+    </Blob>
+
+    <Blob id="halmacpi" action="patch" patcher="hal_nx" enabled="true">
+        <Target>Windows/System32/halmacpi.dll</Target>
+        <Description>Windows ACPI HAL (Bypasses AP NX trampoline and PTE bit 63 fault)</Description>
+        <Options>
+            <Option name="patch_pte" value="true" />
+            <Option name="patch_ap_trampoline" value="true" />
+        </Options>
+    </Blob>
+
     <!-- BCD Store Configuration -->
     <!-- Commands executed against both BIOS (boot\bcd) and UEFI (efi\microsoft\boot\bcd) stores via bcdedit -->
     <Bcd>
         <Command>/set {default} nx AlwaysOff</Command>
         <Command>/set {default} nointegritychecks Yes</Command>
+        <!---
+        <Command>/set {default} debug on</Command>
+        <Command>/dbgsettings serial debugport:1 baudrate:115200</Command>
+        <Command>/set {default} debugtype serial</Command>
+        <Command>/set {default} debugport 1</Command>
+        <Command>/set {default} baudrate 115200</Command>
+        <Command>/set {bootmgr} bootdebug on</Command>
+        <Command>/set {default} bootdebug on</Command>
+        -->
         <Command>/set {default} testsigning Yes</Command>
         <Command>/set {default} recoveryenabled Yes</Command>
         <Command>/set {default} advancedoptions Yes</Command>

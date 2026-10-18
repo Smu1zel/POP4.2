@@ -36,6 +36,7 @@
     <!-- BCD Store Configuration -->
     <!-- Commands executed against both BIOS (boot\bcd) and UEFI (efi\microsoft\boot\bcd) stores via bcdedit -->
     <Bcd>
+        <Command>/set {default} nx AlwaysOff</Command>
         <Command>/set {default} nointegritychecks Yes</Command>
         <Command>/set {default} testsigning Yes</Command>
         <Command>/set {default} recoveryenabled Yes</Command>

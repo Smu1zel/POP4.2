@@ -651,6 +651,34 @@ def patch_winload_nx_bytes(
         else:
             print("[-] Warning: ImgpFilterValidationFailure signature not found in winload.")
 
+    # 4. PTE / PDE XD Bit (Bit 63) Suppression:
+    # Winload unconditionally sets bit 63 (0x80000000 in high DWORD) on read-only and data PTEs:
+    # - MmPaepMapPhysicalAddress: or edx, 0x80000000 (81 CA 00 00 00 80)
+    # - MmPaeSetVirtualAddressRangeAttributes: or dword ptr [edx+4], 0x80000000 (81 4A 04 00 00 00 80)
+    # On CPUs without NX, bit 63 is a reserved bit in PAE mode. Setting it causes an immediate
+    # Page Fault #PF with error code 0x000A (RSVD bit violation) as soon as the kernel touches
+    # the page (e.g. KUSER_SHARED_DATA at 0xFFD00000). NOPing these ensures all PTEs remain valid.
+    if patch_nx:
+        # Patch 1: MmPaepMapPhysicalAddress: 74 06 81 CA 00 00 00 80 -> NOP 6 bytes
+        pte1_sig = bytes.fromhex("740681CA00000080")
+        pte1_idx = data.find(pte1_sig)
+        if pte1_idx != -1:
+            data[pte1_idx + 2 : pte1_idx + 8] = b'\x90' * 6
+            report["pte1_xd_patched"] = True
+            print(f"[+] NOPed out MmPaepMapPhysicalAddress PTE XD bit 63 write at offset 0x{pte1_idx + 2:X}.")
+        elif data.find(bytes.fromhex("7406909090909090")) != -1:
+            print("[*] Notice: MmPaepMapPhysicalAddress PTE XD bit 63 write is already NOPed.")
+
+        # Patch 2: MmPaeSetVirtualAddressRangeAttributes: 83 22 FD 81 4A 04 00 00 00 80 -> NOP 7 bytes
+        pte2_sig = bytes.fromhex("8322FD814A0400000080")
+        pte2_idx = data.find(pte2_sig)
+        if pte2_idx != -1:
+            data[pte2_idx + 3 : pte2_idx + 10] = b'\x90' * 7
+            report["pte2_xd_patched"] = True
+            print(f"[+] NOPed out MmPaeSetVirtualAddressRangeAttributes PTE XD bit 63 write at offset 0x{pte2_idx + 3:X}.")
+        elif data.find(bytes.fromhex("8322FD90909090909090")) != -1:
+            print("[*] Notice: MmPaeSetVirtualAddressRangeAttributes PTE XD bit 63 write is already NOPed.")
+
     return data, report
 
 

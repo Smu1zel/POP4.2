@@ -35,6 +35,7 @@ import re
 import argparse
 import xml.etree.ElementTree as ET
 import urllib.request
+import shlex
 
 try:
     import pefile
@@ -554,12 +555,19 @@ class BlobItem:
         self.options = options or {}
 
 
+DEFAULT_BCD_COMMANDS = [
+    "/set {default} nointegritychecks Yes",
+    "/set {default} bootmenupolicy legacy"
+]
+
+
 class BlobDatabase:
     """Loads and validates badblobs.xml configuration."""
     def __init__(self, xml_path: str, blobs_dir: str):
         self.xml_path = xml_path
         self.blobs_dir = blobs_dir
         self.blobs: dict[str, BlobItem] = {}
+        self.bcd_commands: list = []
         self.load()
 
     def load(self):
@@ -605,6 +613,19 @@ class BlobDatabase:
             )
             self.blobs[b_id] = blob
 
+        # Parse BCD configuration commands
+        bcd_elem = root.find("Bcd")
+        if bcd_elem is None:
+            bcd_elem = root.find("BcdCommands")
+
+        if bcd_elem is not None:
+            self.bcd_commands = []
+            for cmd_elem in bcd_elem.findall("Command"):
+                if cmd_elem.text and cmd_elem.text.strip():
+                    self.bcd_commands.append(cmd_elem.text.strip())
+        else:
+            self.bcd_commands = list(DEFAULT_BCD_COMMANDS)
+
     def validate(self, allow_missing: bool = False) -> bool:
         """
         Enforces fail-fast integrity checking:
@@ -633,6 +654,10 @@ class BlobDatabase:
                 pass
             else:
                 errors.append(f"Blob '{b_id}' has invalid action '{blob.action}'. Must be 'patch', 'replace', or 'ignore'.")
+
+        for cmd in self.bcd_commands:
+            if not isinstance(cmd, str) or not cmd.strip():
+                errors.append("Invalid or empty BCD command found in badblobs configuration.")
 
         if errors:
             print("\n[!] BADBLOBS VALIDATION FAILED:")
@@ -885,16 +910,19 @@ def find_oscdimg(custom_path: str = None) -> str:
     return download_adk_oscdimg(tools_dir)
 
 
-def modify_bcd_stores(iso_files_dir: str):
+def modify_bcd_stores(iso_files_dir: str, bcd_commands: list = None):
     """
-    Configures both BIOS (boot\\bcd) and UEFI (efi\\microsoft\\boot\\bcd) BCD stores on the ISO:
-    1. Disables integrity checks for the boot loader ({default}).
-    2. Enables the legacy F8 boot menu (bootmenupolicy legacy) so users can see its loading bar progress in real time.
+    Configures both BIOS (boot\\bcd) and UEFI (efi\\microsoft\\boot\\bcd) BCD stores on the ISO
+    using commands defined in badblobs.xml (or default fallback commands):
+    - Disables integrity checks and enables testsigning/advancedoptions for the boot loader ({default}).
+    - Enables the legacy F8 boot menu (bootmenupolicy legacy) so users can see loading bar progress in real time.
     """
     bcd_paths = [
         os.path.join(iso_files_dir, "boot", "bcd"),
         os.path.join(iso_files_dir, "efi", "microsoft", "boot", "bcd")
     ]
+    commands_to_run = DEFAULT_BCD_COMMANDS if bcd_commands is None else bcd_commands
+
     for bcd in bcd_paths:
         if os.path.exists(bcd):
             print(f"[+] Patching BCD store: {bcd}")
@@ -904,12 +932,28 @@ def modify_bcd_stores(iso_files_dir: str):
             except Exception:
                 pass
 
-            commands = [
-                ["bcdedit.exe", "/store", bcd, "/set", "{default}", "nointegritychecks", "Yes"],
-                ["bcdedit.exe", "/store", bcd, "/set", "{default}", "bootmenupolicy", "legacy"]
-            ]
-            for c in commands:
-                subprocess.run(c, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for item in commands_to_run:
+                if isinstance(item, (list, tuple)):
+                    tokens = list(item)
+                else:
+                    tokens = [t[1:-1] if t.startswith('"') and t.endswith('"') and len(t) >= 2 else t
+                              for t in shlex.split(item.strip(), posix=False)]
+
+                if not tokens:
+                    continue
+
+                # Strip redundant bcdedit[.exe] if present
+                if tokens[0].lower() in ("bcdedit", "bcdedit.exe"):
+                    tokens.pop(0)
+
+                # Strip redundant /store <path> if present
+                if len(tokens) >= 2 and tokens[0].lower() == "/store":
+                    tokens.pop(0)
+                    tokens.pop(0)
+
+                cmd = ["bcdedit.exe", "/store", bcd] + tokens
+                print(f"  [+] bcdedit: {' '.join(tokens)}")
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def build_iso(
@@ -1095,7 +1139,7 @@ def build_iso(
     print("\n" + "="*70)
     print("STEP 3: Modifying ISO BCD Stores")
     print("="*70)
-    modify_bcd_stores(iso_files_dir)
+    modify_bcd_stores(iso_files_dir, db.bcd_commands if db else None)
 
     # -------------------------------------------------------------------------
     # PART 4: REBUILD BOOTABLE ISO
@@ -1215,7 +1259,7 @@ COMMON USAGE EXAMPLES:
     build_parser.add_argument("-i", "--input-iso", required=True, metavar="PATH", help="Path to source Windows 11 installation ISO file or an extracted directory containing setup media")
     build_parser.add_argument("-o", "--output-iso", default="patched_install.iso", metavar="PATH", help="Destination path and filename for the generated bootable patched ISO. [Default: 'patched_install.iso']")
     build_parser.add_argument("-w", "--work-dir", default=None, metavar="DIR", help="Temporary directory for ISO file staging, WIM mounting, and registry hives. [Default: './build_workspace']")
-    build_parser.add_argument("-c", "--config", default=None, metavar="XML", help="Path to badblobs.xml profile defining patch handlers, replacement blobs, and targets. [Default: './badblobs.xml']")
+    build_parser.add_argument("-c", "--config", default=None, metavar="XML", help="Path to badblobs.xml profile defining patch handlers, replacement blobs, targets, and BCD commands. [Default: './badblobs.xml']")
     build_parser.add_argument("-b", "--blobs-dir", default=None, metavar="DIR", help="Directory containing binary replacement files (e.g. 23H2 WindowsCodecs.dll). [Default: './blobs']")
     index_group = build_parser.add_mutually_exclusive_group()
     index_group.add_argument("--index", default=None, metavar="INDEX", help="Specific Windows edition index in install.wim to patch (e.g. '6' for Windows 11 Pro, 'all' for every edition, or 'none' to skip install.wim entirely). Mutually exclusive with --boot-only. [Default: 'all']")

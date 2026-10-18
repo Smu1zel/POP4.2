@@ -58,8 +58,19 @@ Even if you deploy the WIM manually, Windows will later enter Automatic Recovery
 Likewise, skipping `msxml6.dll` will cause Windows to appear to install, but later fail to register *any* AppX package, resulting in "Why did my PC restart?" and a very broken install that can't even start explorer.
 For these reasons, replacing these files with their 23H2 versions in `blobs/` is required.
 
-## Customizing Blobs (`badblobs.xml`)
-POP4.2 tracks problematic binaries using `badblobs.xml`. Each entry defines target paths and actions (`patch`, `replace`, `ignore`). You can customize or add replacement blobs by editing `badblobs.xml`.
+## Customizing Blobs and BCD (`badblobs.xml`)
+POP4.2 tracks problematic binaries and boot configurations using `badblobs.xml`. Each `<Blob>` entry defines target paths and actions (`patch`, `replace`, `ignore`). You can customize or add replacement blobs by editing `badblobs.xml`.
+
+Additionally, the `<Bcd>` section allows configuring which `bcdedit` commands are executed against both the BIOS (`boot\bcd`) and UEFI (`efi\microsoft\boot\bcd`) BCD stores on the installation media:
+
+```xml
+<Bcd>
+    <Command>/set {default} nointegritychecks Yes</Command>
+    <Command>/set {default} testsigning Yes</Command>
+    <Command>/set {default} advancedoptions Yes</Command>
+    <Command>/set {default} bootmenupolicy legacy</Command>
+</Bcd>
+```
 
 ---
 

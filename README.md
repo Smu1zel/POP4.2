@@ -70,7 +70,7 @@ POP4.2 tracks problematic binaries using `badblobs.xml`. Each entry defines targ
 
 ## Screenshot
 
-![Screenshot](Screenshot.png)
+![Screenshot](images/Screenshot.png)
 
 ## Walkthrough
 You can review [Patching and Installing Windows 11 26H2 Walkthrough](GUIDE.md) for guidance on how to practically patch and install Windows 11 on an unsupported system.

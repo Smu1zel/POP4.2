@@ -743,13 +743,20 @@ def patch_hal_nx_bytes(
          81 CE 00 00 00 80     ; or esi, 0x80000000 (Sets XD bit 63 on high DWORD)
        NOPs out 'or esi, 0x80000000' (6 bytes -> 90 * 6).
 
-    3. Application Processor (AP) Real-Mode Trampoline EFER.NXE Suppression:
-       Offset 0x45D87:
-         66 B9 80 00 00 C0     ; mov ecx, 0xC0000080
-         0F 32                 ; rdmsr
-         66 0D 00 08 00 00     ; or eax, 0x800 (EFER.NXE)
-         0F 30                 ; wrmsr
-       NOPs out the 16-byte EFER.NXE sequence (16 bytes -> 90 * 16) to prevent fatal #GP on secondary cores.
+    3. Application Processor (AP) Real-Mode Trampoline Dynamic NX Detection:
+       Replaces the static 39-byte MSR sequence at offset 0x45D70 with:
+         mov eax, 0x80000001
+         cpuid
+         test edx, 0x00100000  ; NX / XD bit 20
+         je skip_efer          ; Jumps over WRMSR if NX is not supported
+         mov ecx, 0xC0000080
+         rdmsr
+         or eax, 0x800         ; EFER.NXE
+         wrmsr
+         skip_efer:
+         nop * 6
+       Ensures EFER.NXE is set when running on NX hardware (preventing SMP triple fault)
+       while completely skipping the WRMSR on non-NX hardware (preventing #GP).
     """
     report = {
         "remap_xd_patched": False,
@@ -783,17 +790,39 @@ def patch_hal_nx_bytes(
             print("[-] Warning: HalpMap signature not found in hal.dll.")
 
     if patch_ap_trampoline:
-        # Patch 3: AP Real-Mode Trampoline EFER.NXE
-        sig3 = bytes.fromhex("66B9800000C00F32660D000800000F30")
-        p3 = data.find(sig3)
+        # Patch 3: AP Real-Mode Trampoline Dynamic NX Detection
+        # Instead of unconditionally NOPing out EFER.NXE wrmsr (which causes triple-fault on SMP
+        # when NX is enabled because page tables have bit 63 set but Core 1 EFER.NXE remains 0),
+        # replace the sequence with a hardware CPUID check:
+        #   mov eax, 0x80000001
+        #   cpuid
+        #   test edx, 0x00100000  ; Bit 20 = NX / XD feature bit
+        #   je skip_efer          ; If NX not supported, jump straight past WRMSR!
+        #   mov ecx, 0xC0000080   ; EFER MSR
+        #   rdmsr
+        #   or eax, 0x800         ; EFER.NXE
+        #   wrmsr
+        #   skip_efer:
+        #   nop * 6
+        orig_trampoline = bytes.fromhex("2EF70608000100740E66B9A00100000F326683E2FB0F3066B9800000C00F32660D000800000F30")
+        old_noped_trampoline = bytes.fromhex("2EF70608000100740E66B9A00100000F326683E2FB0F30") + b'\x90' * 16
+        dynamic_nx_trampoline = bytes.fromhex("66B8010000800FA266F7C200001000741666B9800000C00F32660D000800000F30909090909090")
+
+        p3 = data.find(orig_trampoline)
         if p3 != -1:
-            data[p3 : p3 + 16] = b'\x90' * 16
+            data[p3 : p3 + 39] = dynamic_nx_trampoline
             report["ap_trampoline_patched"] = True
-            print(f"[+] NOPed out AP real-mode trampoline EFER.NXE wrmsr at offset 0x{p3:X}.")
-        elif data.find(bytes.fromhex("2EF70608000100740E66B9A00100000F326683E2FB0F30") + b'\x90'*16) != -1:
-            print("[*] Notice: AP real-mode trampoline EFER.NXE wrmsr is already NOPed.")
+            print(f"[+] Replaced AP trampoline at offset 0x{p3:X} with dynamic CPUID NX detection.")
         else:
-            print("[-] Warning: AP trampoline EFER.NXE signature not found in hal.dll.")
+            p3_old = data.find(old_noped_trampoline)
+            if p3_old != -1:
+                data[p3_old : p3_old + 39] = dynamic_nx_trampoline
+                report["ap_trampoline_patched"] = True
+                print(f"[+] Upgraded NOPed AP trampoline at offset 0x{p3_old:X} with dynamic CPUID NX detection.")
+            elif data.find(dynamic_nx_trampoline) != -1:
+                print("[*] Notice: AP trampoline dynamic CPUID NX detection is already installed.")
+            else:
+                print("[-] Warning: AP trampoline signature not found in hal.dll.")
 
     return data, report
 

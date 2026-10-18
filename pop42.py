@@ -404,6 +404,41 @@ def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: 
             else:
                 print("[-] Warning: Mandatory NX feature check signature (0x20013CB6) not found in binary.")
 
+        # 2. MmProtectToPteMask XD Bit 63 Suppression:
+        # Windows 10 hardcodes 0x8000000000000000 into the static table MmProtectToPteMask
+        # for all 16 non-executable page protections. On CPUs without NX, bit 63 is an illegal
+        # reserved bit in PAE mode. The instant the kernel touches any non-executable page (pools,
+        # stacks, shared user data), a #PF (RSVD) fault is triggered.
+        # Clearing bit 63 on all 32 entries (256 bytes) stops the kernel from ever setting bit 63.
+        sig_table = bytes.fromhex("0000000000000080000000000000008000000000000000000000000000000000")
+        p_table = data.find(sig_table)
+        if p_table != -1:
+            cleared_entries = 0
+            for i in range(32):
+                high_off = p_table + i * 8 + 4
+                if data[high_off + 3] & 0x80:
+                    data[high_off + 3] &= 0x7F
+                    cleared_entries += 1
+            report["pte_mask_cleared"] = True
+            print(f"[+] Cleared bit 63 from {cleared_entries} entries in MmProtectToPteMask at offset 0x{p_table:X}.")
+        else:
+            sig_table_patched = bytes.fromhex("0000000000000000000000000000000000000000000000000000000000000000")
+            if data.find(sig_table_patched) != -1:
+                print("[*] Notice: MmProtectToPteMask entries already have bit 63 cleared.")
+            else:
+                print("[-] Warning: MmProtectToPteMask signature not found in kernel binary.")
+
+        # 3. Suppress forced XD bit writes in shadow PTE routines (MiWritePteShadow, MiInitializeSharedUserData):
+        # Pattern: 83 C8 00 74 28 81 CA 00 00 00 80 -> NOP 6 bytes of 'or edx, 0x80000000'
+        pat_shadow = bytes.fromhex("83C800742881CA00000080")
+        shadow_matches = list(re.finditer(re.escape(pat_shadow), bytes(data)))
+        if shadow_matches:
+            for sm in shadow_matches:
+                s_off = sm.start() + 5
+                data[s_off : s_off + 6] = b'\x90' * 6
+                print(f"[+] NOPed out forced XD bit write in shadow PTE routine at offset 0x{s_off:X}.")
+            report["shadow_xd_patched"] = True
+
     # Optional KeBugCheckEx infinite loop patch (EB FE) for QEMU GDB debugging
     if enable_debug:
         try:

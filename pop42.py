@@ -455,11 +455,11 @@ def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: 
 
         # 5. Suppress forced XD bit writes on Kernel Stacks (or eax, 0x62; or ecx, 0x80000000):
         # Pattern: 83 C8 62 81 C9 00 00 00 80 -> NOP out the 6 bytes of 'or ecx, 0x80000000'
-        pat_kstack = bytes.fromhex("83C86281C900000080")
+        pat_kstack = bytes.fromhex("81C900000080")
         kstack_matches = list(re.finditer(re.escape(pat_kstack), bytes(data)))
         if kstack_matches:
             for km in kstack_matches:
-                k_off = km.start() + 3
+                k_off = km.start()
                 data[k_off : k_off + 6] = b'\x90' * 6
                 print(f"[+] NOPed out forced XD bit write on kernel stack PTE at offset 0x{k_off:X}.")
             report["kstack_xd_patched"] = True

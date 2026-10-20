@@ -453,16 +453,50 @@ def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: 
                 print(f"[+] Cleared shifted NX bit (0xFF800000 -> 0xFF000000) at offset 0x{byte_off:X}.")
             report["shld_nx_patched"] = True
 
-        # 5. Suppress forced XD bit writes on Kernel Stacks (or eax, 0x62; or ecx, 0x80000000):
-        # Pattern: 83 C8 62 81 C9 00 00 00 80 -> NOP out the 6 bytes of 'or ecx, 0x80000000'
-        pat_kstack = bytes.fromhex("81C900000080")
-        kstack_matches = list(re.finditer(re.escape(pat_kstack), bytes(data)))
-        if kstack_matches:
-            for km in kstack_matches:
-                k_off = km.start()
-                data[k_off : k_off + 6] = b'\x90' * 6
-                print(f"[+] NOPed out forced XD bit write on kernel stack PTE at offset 0x{k_off:X}.")
-            report["kstack_xd_patched"] = True
+        # 5. Suppress forced XD bit writes in Memory Manager PTE routines (Mi* / Mm*):
+        # Blanket NOPing of '81 C9 00 00 00 80' (or ecx, 0x80000000) causes severe collateral damage:
+        # it corrupts heap allocations (RtlpHpEnvAllocVA -> MEMORY_MANAGEMENT BSOD), processor initialization
+        # (KiInitializeKernel), power dispatcher (PopEsWorkItemSchedule), and read-only strings.
+        # Instead, we surgically match the actual Memory Manager PTE operations:
+        # - MiMarkBootKernelStack (initial kernel stack protection)
+        # - MmFreeLoaderBlock (converting loader memory blocks to system pages during boot)
+        # - MiPerformSafePdeWrite (atomic 64-bit cmpxchg8b PDE writer)
+        # - General PTE high DWORD loads: mov ecx, [reg+4]; or ecx, 0x80000000
+        # - Shadow PTE with ecx (MiAllocateWsle, MiMakePageAvoidRead)
+        mm_pte_patterns = [
+            # MiMarkBootKernelStack: or eax, 0x62; or ecx, 0x80000000
+            (re.compile(rb'(\x83\xC8\x62)\x81\xC9\x00\x00\x00\x80'), 3, "MiMarkBootKernelStack"),
+            # MmFreeLoaderBlock (3 distinct boot-time memory conversion sites)
+            (re.compile(rb'(\x8B\x48\x04)\x81\xC9\x00\x00\x00\x80'), 3, "MmFreeLoaderBlock[1]"),
+            (re.compile(rb'(\x8B\x4C\x01\x04)\x81\xC9\x00\x00\x00\x80'), 4, "MmFreeLoaderBlock[2]"),
+            (re.compile(rb'(\x8B\x0A)\x81\xC9\x00\x00\x00\x80\x83\xE8\x01'), 2, "MmFreeLoaderBlock[3]"),
+            # MiPerformSafePdeWrite: atomic 64-bit cmpxchg8b PDE writer
+            (re.compile(rb'\x81\xC9\x00\x00\x00\x80\xEB\xA9'), 0, "MiPerformSafePdeWrite"),
+            # General PTE high DWORD loads: mov ecx, dword ptr [reg+4]; or ecx, 0x80000000
+            (re.compile(rb'(\x8B[\x48\x49\x4A\x4B\x4E\x4F]\x04)\x81\xC9\x00\x00\x00\x80'), 3, "PteHighDwordLoad"),
+            # Shadow PTE with ecx (MiAllocateWsle, MiMakePageAvoidRead)
+            (re.compile(rb'(\x83\xC8\x00\x74[\x20-\x30].{1,6})\x81\xC9\x00\x00\x00\x80'), -6, "ShadowPteEcx"),
+        ]
+
+        patched_pte_sites = 0
+        already_patched_pte = 0
+        seen_offsets = set()
+
+        for pat, offset_adj, desc in mm_pte_patterns:
+            for m in pat.finditer(data):
+                k_off = m.end() + offset_adj if offset_adj < 0 else m.start() + offset_adj
+                if k_off not in seen_offsets:
+                    seen_offsets.add(k_off)
+                    if data[k_off : k_off + 6] == b'\x81\xC9\x00\x00\x00\x80':
+                        data[k_off : k_off + 6] = b'\x90' * 6
+                        patched_pte_sites += 1
+                        print(f"[+] NOPed out forced XD bit write in {desc} at offset 0x{k_off:X}.")
+                    elif data[k_off : k_off + 6] == b'\x90' * 6:
+                        already_patched_pte += 1
+
+        if patched_pte_sites > 0 or already_patched_pte > 0:
+            report["mm_pte_xd_patched"] = True
+            print(f"[+] Memory Manager PTE XD bit suppression applied to {patched_pte_sites} sites ({already_patched_pte} already patched).")
 
     # Optional KeBugCheckEx infinite loop patch (EB FE) for QEMU GDB debugging
     if enable_debug:

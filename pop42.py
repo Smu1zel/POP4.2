@@ -476,6 +476,8 @@ def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: 
             (re.compile(rb'(\x8B[\x48\x49\x4A\x4B\x4E\x4F]\x04)\x81\xC9\x00\x00\x00\x80'), 3, "PteHighDwordLoad"),
             # Shadow PTE with ecx (MiAllocateWsle, MiMakePageAvoidRead)
             (re.compile(rb'(\x83\xC8\x00\x74[\x20-\x30].{1,6})\x81\xC9\x00\x00\x00\x80'), -6, "ShadowPteEcx"),
+            # MiAllocateWsle: mov edi, [ebp+0x1c]; or edi, 0x80000000 (prepares PTE high DWORD)
+            (re.compile(rb'(\x8B\x7D\x1C)\x81\xCF\x00\x00\x00\x80'), 3, "MiAllocateWsle[edi]"),
         ]
 
         patched_pte_sites = 0
@@ -487,7 +489,7 @@ def patch_kernel_nx_bytes(data: bytearray, patch_nx: bool = True, enable_debug: 
                 k_off = m.end() + offset_adj if offset_adj < 0 else m.start() + offset_adj
                 if k_off not in seen_offsets:
                     seen_offsets.add(k_off)
-                    if data[k_off : k_off + 6] == b'\x81\xC9\x00\x00\x00\x80':
+                    if data[k_off] == 0x81 and data[k_off + 1] in (0xC9, 0xCF) and data[k_off + 2 : k_off + 6] == b'\x00\x00\x00\x80':
                         data[k_off : k_off + 6] = b'\x90' * 6
                         patched_pte_sites += 1
                         print(f"[+] NOPed out forced XD bit write in {desc} at offset 0x{k_off:X}.")
